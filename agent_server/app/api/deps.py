@@ -19,9 +19,7 @@ def get_user_service(db: Session = Depends(get_db_dep)) -> UserService:
 def get_current_user(
     user_service: UserService = Depends(get_user_service),
 ) -> User:
-    # 临时方案：固定读取 id=1 的用户
-    # 接 JWT 后会替换掉这里  maybe :/
-    user = user_service.get_user_by_id(1)
+    user = user_service.get_user_by_username("student_demo")
 
     if user is None:
         raise HTTPException(
