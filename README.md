@@ -17,6 +17,14 @@
 
 sql use postgresql 16.13.1
 
+sql Migration use Alembic
+
+alembic revision --autogenerate -m "add_...."  //to write py 
+
+alembic upgrade head // to migration
+
+// if you just want to update local sql just pull and run 
+alembic upgrade head
 
 python version 3.12.8
 

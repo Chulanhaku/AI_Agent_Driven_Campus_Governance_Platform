@@ -13,4 +13,12 @@ from .pending_action import PendingAction
 from .tool_execution_log import ToolExecutionLog
 from .audit_log import AuditLog
 
-__all__ = []
+__all__ = [
+    "Role",
+    "Permission",
+    "RolePermission",
+    "User",
+    "StudentProfile",
+    "TeacherProfile",
+    "ScheduleEntry",
+]
