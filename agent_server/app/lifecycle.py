@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     logger.info("application starting...")
+    logger.info("database layer ready to initialize")
     # 后续在这里初始化：
     # - database connection check
     # - redis connection check
