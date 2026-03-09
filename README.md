@@ -10,3 +10,23 @@
 # Early Warning: If you find a task impossible to complete, please inform the team at least 2 days before the deadline. It’s okay to admit it’s out of reach—communication is key.
 
 # Please create your own branch when push; do not upload to the main branch.
+
+
+for agent_server
+
+sql use postgresql 16.13.1
+
+
+python version 3.12.8
+
+
+virtual env create and active
+
+python -m venv .venv
+.\.venv\Scripts\activate
+
+for deactivate
+deactivate
+
+pip
+pip install -r requirements.txt
