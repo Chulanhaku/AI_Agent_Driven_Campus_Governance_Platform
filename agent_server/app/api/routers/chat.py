@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user, get_db_dep
+from app.api.deps import get_current_user, get_db_dep, get_llm_provider
 from app.api.schemas.chat import (
     ChatConfirmRequestSchema,
     ChatHistoryResponseSchema,
@@ -16,6 +16,7 @@ from app.db.repositories.leave_repository import LeaveRepository
 from app.db.repositories.pending_action_repository import PendingActionRepository
 from app.db.repositories.schedule_repository import ScheduleRepository
 from app.db.repositories.tool_execution_log_repository import ToolExecutionLogRepository
+from app.llm.base import BaseLlmProvider
 from app.services.agent_session_service import AgentSessionService
 from app.services.audit_service import AuditService
 from app.services.campus_card_service import CampusCardService
@@ -26,7 +27,10 @@ from app.services.tool_execution_log_service import ToolExecutionLogService
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 
-def get_agent_session_service(db: Session = Depends(get_db_dep)) -> AgentSessionService:
+def get_agent_session_service(
+    db: Session = Depends(get_db_dep),
+    llm_provider: BaseLlmProvider = Depends(get_llm_provider),
+) -> AgentSessionService:
     agent_session_repository = AgentSessionRepository(db)
     pending_action_repository = PendingActionRepository(db)
     schedule_repository = ScheduleRepository(db)
@@ -49,6 +53,7 @@ def get_agent_session_service(db: Session = Depends(get_db_dep)) -> AgentSession
         leave_service=leave_service,
         audit_service=audit_service,
         tool_execution_log_service=tool_execution_log_service,
+        llm_provider=llm_provider,
     )
 
 

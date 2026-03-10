@@ -1,8 +1,34 @@
 import re
 
+from app.llm.base import BaseLlmProvider
+
 
 class AgentRouter:
+    def __init__(self, llm_provider: BaseLlmProvider | None = None) -> None:
+        self.llm_provider = llm_provider
+
     def detect_intent(self, message: str) -> str:
+        rule_intent = self._detect_intent_by_rules(message)
+        if rule_intent != "fallback":
+            return rule_intent
+
+        if self.llm_provider is not None:
+            try:
+                result = self.llm_provider.classify_intent(message=message)
+                intent = result.get("intent", "fallback")
+                if intent in {
+                    "query_schedule",
+                    "campus_card_topup",
+                    "leave_create",
+                    "fallback",
+                }:
+                    return intent
+            except Exception:
+                pass
+
+        return "fallback"
+
+    def _detect_intent_by_rules(self, message: str) -> str:
         normalized = message.strip().lower()
 
         leave_keywords = [
@@ -71,3 +97,12 @@ class AgentRouter:
                     return reason
 
         return None
+
+    def extract_slots_with_llm(self, *, intent: str, message: str) -> dict:
+        if self.llm_provider is None:
+            return {}
+
+        try:
+            return self.llm_provider.extract_slots(intent=intent, message=message)
+        except Exception:
+            return {}

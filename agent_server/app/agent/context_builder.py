@@ -20,4 +20,10 @@ class ContextBuilder:
             },
             "message": message,
             "available_tools": tool_registry.list_names(),
+            "supported_intents": [
+                "query_schedule",
+                "campus_card_topup",
+                "leave_create",
+                "fallback",
+            ],
         }

@@ -1,11 +1,13 @@
 from app.agent.context_builder import ContextBuilder
 from app.agent.executor import Executor
 from app.agent.planner import Planner
+from app.agent.prompt_manager import PromptManager
 from app.agent.response_formatter import ResponseFormatter
 from app.agent.router import AgentRouter
 from app.db.models import AgentMessage, AgentSession, User
 from app.db.repositories.agent_session_repository import AgentSessionRepository
 from app.db.repositories.pending_action_repository import PendingActionRepository
+from app.llm.base import BaseLlmProvider
 from app.services.audit_service import AuditService
 from app.services.campus_card_service import CampusCardService
 from app.services.leave_service import LeaveService
@@ -29,6 +31,7 @@ class AgentSessionService:
         leave_service: LeaveService,
         audit_service: AuditService,
         tool_execution_log_service: ToolExecutionLogService,
+        llm_provider: BaseLlmProvider,
     ) -> None:
         self.agent_session_repository = agent_session_repository
         self.pending_action_repository = pending_action_repository
@@ -37,12 +40,14 @@ class AgentSessionService:
         self.leave_service = leave_service
         self.audit_service = audit_service
         self.tool_execution_log_service = tool_execution_log_service
+        self.llm_provider = llm_provider
 
-        self.router = AgentRouter()
+        self.router = AgentRouter(llm_provider=llm_provider)
         self.context_builder = ContextBuilder()
         self.planner = Planner()
         self.executor = Executor()
         self.response_formatter = ResponseFormatter()
+        self.prompt_manager = PromptManager()
 
     def get_user_session(
         self,
@@ -312,9 +317,30 @@ class AgentSessionService:
         tool_registry.register(balance_tool)
 
         intent = self.router.detect_intent(user_message)
+
         amount = self.router.extract_amount(user_message)
         leave_days = self.router.extract_leave_days(user_message)
         leave_reason = self.router.extract_leave_reason(user_message)
+
+        # 规则抽不出来，再让 LLM 补
+        llm_slots = {}
+        if (
+            (intent == "campus_card_topup" and not amount)
+            or (intent == "leave_create" and (not leave_days or not leave_reason))
+        ):
+            llm_slots = self.router.extract_slots_with_llm(
+                intent=intent,
+                message=user_message,
+            )
+
+        if intent == "campus_card_topup" and not amount:
+            amount = llm_slots.get("amount")
+
+        if intent == "leave_create":
+            if not leave_days:
+                leave_days = llm_slots.get("days")
+            if not leave_reason:
+                leave_reason = llm_slots.get("reason")
 
         context = self.context_builder.build(
             current_user=current_user,
@@ -372,8 +398,8 @@ class AgentSessionService:
             pending_action = workflow.create_pending_leave_request(
                 current_user=current_user,
                 session_id=session_id,
-                days=leave_days,
-                reason=leave_reason,
+                days=int(leave_days),
+                reason=str(leave_reason),
                 leave_type="sick",
             )
 
@@ -408,7 +434,7 @@ class AgentSessionService:
         )
 
         if intent == "fallback" or plan.get("action") == "fallback":
-            return self._build_mock_reply(
+            return self._build_fallback_reply(
                 user_name=current_user.full_name,
                 user_message=user_message,
             ), False, None
@@ -467,13 +493,20 @@ class AgentSessionService:
             )
             raise
 
-    def _build_mock_reply(
+    def _build_fallback_reply(
         self,
+        *,
         user_name: str,
         user_message: str,
     ) -> str:
-        return (
-            f"你好，{user_name}。我已经收到你的消息：{user_message}。"
-            "当前这条消息还没有匹配到已实现的 Agent 工具能力，所以先返回一条 fallback 回复。"
-            "目前我已经开始支持“查课表”“校园卡充值”“请假申请”这三类请求。"
-        )
+        try:
+            return self.llm_provider.generate_fallback_reply(
+                user_name=user_name,
+                message=user_message,
+            )
+        except Exception:
+            return (
+                f"你好，{user_name}。我已经收到你的消息：{user_message}。"
+                "当前这条消息还没有匹配到已实现的 Agent 工具能力，所以先返回一条 fallback 回复。"
+                "目前我已经开始支持“查课表”“校园卡充值”“请假申请”这三类请求。"
+            )
