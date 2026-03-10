@@ -5,6 +5,17 @@ class AgentRouter:
     def detect_intent(self, message: str) -> str:
         normalized = message.strip().lower()
 
+        leave_keywords = [
+            "请假",
+            "我要请假",
+            "请病假",
+            "请事假",
+            "leave",
+        ]
+        for keyword in leave_keywords:
+            if keyword in normalized:
+                return "leave_create"
+
         topup_keywords = [
             "充值",
             "充钱",
@@ -37,4 +48,26 @@ class AgentRouter:
         match = re.search(r"(\d+(?:\.\d{1,2})?)", message)
         if match:
             return match.group(1)
+        return None
+
+    def extract_leave_days(self, message: str) -> int | None:
+        match = re.search(r"(\d+)\s*天", message)
+        if match:
+            return int(match.group(1))
+        return None
+
+    def extract_leave_reason(self, message: str) -> str | None:
+        patterns = [
+            r"原因是(.+)$",
+            r"因为(.+)$",
+            r"原因[:：]\s*(.+)$",
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, message)
+            if match:
+                reason = match.group(1).strip()
+                if reason:
+                    return reason
+
         return None

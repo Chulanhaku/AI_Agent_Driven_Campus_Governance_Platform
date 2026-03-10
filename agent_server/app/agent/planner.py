@@ -21,6 +21,18 @@ class Planner:
                 },
             }
 
+        if intent == "leave_create":
+            return {
+                "action": "create_pending_leave",
+                "params": {
+                    "user_id": context["current_user"]["id"],
+                    "session_id": context["session_id"],
+                    "days": context.get("leave_days"),
+                    "reason": context.get("leave_reason"),
+                    "leave_type": "sick",
+                },
+            }
+
         return {
             "action": "fallback",
         }

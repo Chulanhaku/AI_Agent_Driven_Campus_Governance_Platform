@@ -10,12 +10,18 @@ from app.api.schemas.chat import (
 )
 from app.db.models import User
 from app.db.repositories.agent_session_repository import AgentSessionRepository
+from app.db.repositories.audit_log_repository import AuditLogRepository
 from app.db.repositories.campus_card_repository import CampusCardRepository
+from app.db.repositories.leave_repository import LeaveRepository
 from app.db.repositories.pending_action_repository import PendingActionRepository
 from app.db.repositories.schedule_repository import ScheduleRepository
+from app.db.repositories.tool_execution_log_repository import ToolExecutionLogRepository
 from app.services.agent_session_service import AgentSessionService
+from app.services.audit_service import AuditService
 from app.services.campus_card_service import CampusCardService
+from app.services.leave_service import LeaveService
 from app.services.schedule_service import ScheduleService
+from app.services.tool_execution_log_service import ToolExecutionLogService
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -25,15 +31,24 @@ def get_agent_session_service(db: Session = Depends(get_db_dep)) -> AgentSession
     pending_action_repository = PendingActionRepository(db)
     schedule_repository = ScheduleRepository(db)
     campus_card_repository = CampusCardRepository(db)
+    leave_repository = LeaveRepository(db)
+    audit_log_repository = AuditLogRepository(db)
+    tool_execution_log_repository = ToolExecutionLogRepository(db)
 
     schedule_service = ScheduleService(schedule_repository)
     campus_card_service = CampusCardService(campus_card_repository)
+    leave_service = LeaveService(leave_repository)
+    audit_service = AuditService(audit_log_repository)
+    tool_execution_log_service = ToolExecutionLogService(tool_execution_log_repository)
 
     return AgentSessionService(
         agent_session_repository=agent_session_repository,
         pending_action_repository=pending_action_repository,
         schedule_service=schedule_service,
         campus_card_service=campus_card_service,
+        leave_service=leave_service,
+        audit_service=audit_service,
+        tool_execution_log_service=tool_execution_log_service,
     )
 
 

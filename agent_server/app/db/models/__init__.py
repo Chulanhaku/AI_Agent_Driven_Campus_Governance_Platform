@@ -28,4 +28,8 @@ __all__ = [
     "CampusCardAccount",
     "CampusCardTransaction",
     "PendingAction",
+    "LeaveRequest",
+    "ApprovalRecord",
+    "AuditLog",
+    "ToolExecutionLog",
 ]

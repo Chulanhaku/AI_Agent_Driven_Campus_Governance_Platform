@@ -33,4 +33,26 @@ class ResponseFormatter:
                 f"交易号：{data['txn_id']}"
             )
 
+        if intent == "leave_create" and result.get("requires_confirmation"):
+            action_id = result.get("action_id")
+            days = result.get("days")
+            reason = result.get("reason")
+            return (
+                f"即将提交请假申请。\n"
+                f"请假天数：{days} 天\n"
+                f"原因：{reason}\n"
+                f"请确认本次操作。待确认动作 ID：{action_id}"
+            )
+
+        if intent == "leave_create" and result.get("success"):
+            data = result["data"]
+            return (
+                f"请假申请提交成功。\n"
+                f"请假单号：{data['leave_request_id']}\n"
+                f"请假类型：{data['leave_type']}\n"
+                f"起始日期：{data['start_date']}\n"
+                f"结束日期：{data['end_date']}\n"
+                f"状态：{data['status']}"
+            )
+
         return "我已经收到你的消息，但当前还没有匹配到具体业务能力，所以先进入普通回复模式。"
