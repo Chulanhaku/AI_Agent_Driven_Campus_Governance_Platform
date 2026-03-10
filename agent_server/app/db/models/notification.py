@@ -13,4 +13,4 @@ class Notification(Base, TimestampMixin):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
 
-    user = relationship("User", back_populates="notifications")
+    # user = relationship("User", back_populates="notifications")

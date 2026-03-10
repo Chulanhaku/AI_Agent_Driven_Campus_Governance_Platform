@@ -1,5 +1,6 @@
-from sqlalchemy import String, Text, ForeignKey
+from sqlalchemy import ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from app.db.base import Base, TimestampMixin
 
 
@@ -7,9 +8,13 @@ class AgentMessage(Base, TimestampMixin):
     __tablename__ = "agent_messages"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    session_id: Mapped[int] = mapped_column(ForeignKey("agent_sessions.id"), nullable=False, index=True)
-    role: Mapped[str] = mapped_column(String(20), nullable=False)
+    session_id: Mapped[int] = mapped_column(
+        ForeignKey("agent_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    role: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    message_type: Mapped[str] = mapped_column(String(30), default="text", nullable=False)
+    message_type: Mapped[str] = mapped_column(String(30), default="text", nullable=False, index=True)
 
     session = relationship("AgentSession", back_populates="messages")

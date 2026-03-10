@@ -1,5 +1,6 @@
 from app.db.session import SessionLocal
 from app.db.models import Role, User, StudentProfile
+from app.security.auth import hash_password
 
 
 def seed_demo_user() -> None:
@@ -16,7 +17,7 @@ def seed_demo_user() -> None:
 
         user = User(
             username="student_demo",
-            password_hash="demo_hash",
+            password_hash=hash_password("123456"),
             full_name="演示学生",
             email="student_demo@example.com",
             role_id=student_role.id,

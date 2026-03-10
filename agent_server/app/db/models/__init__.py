@@ -20,5 +20,12 @@ __all__ = [
     "User",
     "StudentProfile",
     "TeacherProfile",
+    "Course",
     "ScheduleEntry",
+    "ExamSchedule",
+    "AgentSession",
+    "AgentMessage",
+    "CampusCardAccount",
+    "CampusCardTransaction",
+    "PendingAction",
 ]

@@ -13,4 +13,4 @@ class AuditLog(Base, TimestampMixin):
     target_id: Mapped[int | None] = mapped_column(nullable=True)
     detail_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
-    user = relationship("User", back_populates="audit_logs")
+    # user = relationship("User", back_populates="audit_logs")

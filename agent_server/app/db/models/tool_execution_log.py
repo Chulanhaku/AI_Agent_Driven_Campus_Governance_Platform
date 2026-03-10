@@ -16,4 +16,4 @@ class ToolExecutionLog(Base, TimestampMixin):
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-    session = relationship("AgentSession", back_populates="tool_logs")
+    # session = relationship("AgentSession", back_populates="tool_logs")

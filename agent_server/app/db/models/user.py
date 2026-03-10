@@ -72,3 +72,22 @@ class User(Base, TimestampMixin):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+
+    agent_sessions = relationship(
+        "AgentSession",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+    campus_card_account = relationship(
+        "CampusCardAccount",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+
+    pending_actions = relationship(
+        "PendingAction",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )

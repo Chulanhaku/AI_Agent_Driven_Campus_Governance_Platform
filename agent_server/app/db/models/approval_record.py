@@ -12,4 +12,4 @@ class ApprovalRecord(Base, TimestampMixin):
     action: Mapped[str] = mapped_column(String(20), nullable=False)
     comment: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    leave_request = relationship("LeaveRequest", back_populates="approval_records")
+    # leave_request = relationship("LeaveRequest", back_populates="approval_records")

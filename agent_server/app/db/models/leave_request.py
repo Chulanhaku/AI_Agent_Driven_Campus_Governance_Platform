@@ -16,5 +16,5 @@ class LeaveRequest(Base, TimestampMixin):
     status: Mapped[str] = mapped_column(String(20), default="draft", nullable=False)
     submitted_at: Mapped[date | None] = mapped_column(Date, nullable=True)
 
-    user = relationship("User", back_populates="leave_requests")
-    approval_records = relationship("ApprovalRecord", back_populates="leave_request")
+    # user = relationship("User", back_populates="leave_requests")
+    # approval_records = relationship("ApprovalRecord", back_populates="leave_request")
