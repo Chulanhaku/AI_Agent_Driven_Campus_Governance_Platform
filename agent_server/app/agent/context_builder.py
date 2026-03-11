@@ -9,6 +9,7 @@ class ContextBuilder:
         current_user: User,
         message: str,
         tool_registry: ToolRegistry,
+        memory_context: dict | None = None,
     ) -> dict:
         return {
             "current_user": {
@@ -24,6 +25,12 @@ class ContextBuilder:
                 "query_schedule",
                 "campus_card_topup",
                 "leave_create",
+                "policy_qa",
                 "fallback",
             ],
+            "memory": memory_context or {
+                "recent_messages": [],
+                "recent_message_count": 0,
+                "slot_memory": {},
+            },
         }

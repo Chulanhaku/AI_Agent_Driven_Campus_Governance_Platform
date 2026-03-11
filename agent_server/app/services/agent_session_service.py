@@ -21,7 +21,7 @@ from app.tools.registry import ToolRegistry
 from app.tools.schedule_tools import QueryMyScheduleTool
 from app.workflows.leave_workflow import LeaveWorkflow
 from app.workflows.recharge_workflow import RechargeWorkflow
-
+from app.agent.memory import MemoryManager
 
 class AgentSessionService:
     def __init__(
@@ -54,6 +54,7 @@ class AgentSessionService:
         self.executor = Executor()
         self.response_formatter = ResponseFormatter()
         self.prompt_manager = PromptManager()
+        self.memory_manager = MemoryManager(agent_session_repository)
 
     def get_user_session(self, session_id: int, user_id: int) -> AgentSession | None:
         return self.agent_session_repository.get_session_by_id_and_user_id(
@@ -310,6 +311,38 @@ class AgentSessionService:
         amount = self.router.extract_amount(user_message)
         leave_days = self.router.extract_leave_days(user_message)
         leave_reason = self.router.extract_leave_reason(user_message)
+        memory_context = self.memory_manager.build_memory_context(
+            session_id=session_id,
+            limit=8,
+        )
+        slot_memory = memory_context.get("slot_memory", {})
+
+        if intent == "fallback":
+            pending_intent = slot_memory.get("pending_intent")
+            if pending_intent in {
+                "campus_card_topup",
+                "leave_create",
+                "query_schedule",
+            }:
+                intent = pending_intent
+
+        if not amount:
+            amount = (
+                slot_memory.get("campus_card_topup", {})
+                .get("amount")
+            )
+
+        if not leave_days:
+            leave_days = (
+                slot_memory.get("leave_create", {})
+                .get("days")
+            )
+
+        if not leave_reason:
+            leave_reason = (
+                slot_memory.get("leave_create", {})
+                .get("reason")
+            )
 
         llm_slots = {}
         if (
@@ -317,7 +350,7 @@ class AgentSessionService:
             or (intent == "leave_create" and (not leave_days or not leave_reason))
         ):
             llm_slots = self.router.extract_slots_with_llm(intent=intent, message=user_message)
-
+        print("LLM extracted slots:", llm_slots)
         if intent == "campus_card_topup" and not amount:
             amount = llm_slots.get("amount")
 
@@ -331,6 +364,7 @@ class AgentSessionService:
             current_user=current_user,
             message=user_message,
             tool_registry=tool_registry,
+            memory_context=memory_context,
         )
         context["session_id"] = session_id
         context["amount"] = amount
@@ -340,6 +374,18 @@ class AgentSessionService:
         plan = self.planner.build_plan(intent=intent, context=context)
 
         if plan.get("action") == "create_pending_topup":
+            #wait for test
+            if amount:
+                self.memory_manager.save_slot_memory(
+                    session_id=session_id,
+                    pending_intent="campus_card_topup",
+                    intent_slots={
+                        "campus_card_topup": {
+                            "amount": amount,
+                        }
+                    },
+                )
+            #
             if not amount:
                 return "我识别到你想充值校园卡，但没有解析到金额。比如你可以说：帮我充值 50 元。", False, None
 
@@ -373,6 +419,24 @@ class AgentSessionService:
             return response_text, True, pending_action.id
 
         if plan.get("action") == "create_pending_leave":
+            # wait for test
+            leave_slot_data = {}
+
+            if leave_days:
+                leave_slot_data["days"] = int(leave_days)
+
+            if leave_reason:
+                leave_slot_data["reason"] = str(leave_reason)
+
+            if leave_slot_data:
+                self.memory_manager.save_slot_memory(
+                    session_id=session_id,
+                    pending_intent="leave_create",
+                    intent_slots={
+                        "leave_create": leave_slot_data,
+                    },
+                )
+            #
             if not leave_days:
                 return "我识别到你想请假，但没有解析到请假天数。比如你可以说：我要请假 2 天，原因是发烧。", False, None
 
@@ -422,6 +486,7 @@ class AgentSessionService:
             return self._build_fallback_reply(
                 user_name=current_user.full_name,
                 user_message=user_message,
+                memory_context=memory_context,
             ), False, None
 
         if not result.get("success"):
@@ -508,8 +573,24 @@ class AgentSessionService:
         *,
         user_name: str,
         user_message: str,
+        memory_context: dict | None = None,
     ) -> str:
+        recent_messages = memory_context.get("recent_messages", []) if memory_context else []
+
+        memory_text = ""
+        if recent_messages:
+            lines = []
+            for item in recent_messages[-4:]:
+                lines.append(f"{item['role']}: {item['content']}")
+            memory_text = "\n".join(lines)
+
         try:
+            if memory_text:
+                return self.llm_provider.generate_fallback_reply(
+                    user_name=user_name,
+                    message=f"最近对话：\n{memory_text}\n\n用户当前消息：{user_message}",
+                )
+
             return self.llm_provider.generate_fallback_reply(
                 user_name=user_name,
                 message=user_message,
@@ -518,5 +599,4 @@ class AgentSessionService:
             return (
                 f"你好，{user_name}。我已经收到你的消息：{user_message}。"
                 "当前这条消息还没有匹配到已实现的 Agent 工具能力，所以先返回一条 fallback 回复。"
-                "目前我已经开始支持“查课表”“校园卡充值”“请假申请”“制度问答”这四类请求。"
             )
