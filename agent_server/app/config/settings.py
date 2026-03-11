@@ -22,10 +22,10 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 120
 
-    llm_provider: str = "mock"   # mock / openai / local
-    openai_api_key: str | None = None
-    openai_base_url: str | None = None
-    openai_model: str = "gpt-4.1-mini"
+    llm_provider: str = "openai"  # mock / openai / local
+    openai_api_key: str  = "sk-76015da1629945a49ea00c02345bb193"
+    openai_base_url: str  = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    openai_model: str = "qwen-3.5-plus"
     local_model_name: str | None = None
 
 
