@@ -8,6 +8,7 @@ from app.db.models import AgentMessage, AgentSession, User
 from app.db.repositories.agent_session_repository import AgentSessionRepository
 from app.db.repositories.pending_action_repository import PendingActionRepository
 from app.llm.base import BaseLlmProvider
+from app.rag.retriever import Retriever
 from app.services.audit_service import AuditService
 from app.services.campus_card_service import CampusCardService
 from app.services.leave_service import LeaveService
@@ -15,6 +16,7 @@ from app.services.schedule_service import ScheduleService
 from app.services.tool_execution_log_service import ToolExecutionLogService
 from app.tools.campus_card_tools import ExecuteCampusCardTopupTool, QueryCampusCardBalanceTool
 from app.tools.leave_tools import ExecuteLeaveCreateTool
+from app.tools.rag_tools import QueryPolicyKnowledgeTool
 from app.tools.registry import ToolRegistry
 from app.tools.schedule_tools import QueryMyScheduleTool
 from app.workflows.leave_workflow import LeaveWorkflow
@@ -32,6 +34,8 @@ class AgentSessionService:
         audit_service: AuditService,
         tool_execution_log_service: ToolExecutionLogService,
         llm_provider: BaseLlmProvider,
+        retriever: Retriever,
+        rag_top_k: int,
     ) -> None:
         self.agent_session_repository = agent_session_repository
         self.pending_action_repository = pending_action_repository
@@ -41,6 +45,8 @@ class AgentSessionService:
         self.audit_service = audit_service
         self.tool_execution_log_service = tool_execution_log_service
         self.llm_provider = llm_provider
+        self.retriever = retriever
+        self.rag_top_k = rag_top_k
 
         self.router = AgentRouter(llm_provider=llm_provider)
         self.context_builder = ContextBuilder()
@@ -49,25 +55,16 @@ class AgentSessionService:
         self.response_formatter = ResponseFormatter()
         self.prompt_manager = PromptManager()
 
-    def get_user_session(
-        self,
-        session_id: int,
-        user_id: int,
-    ) -> AgentSession | None:
+    def get_user_session(self, session_id: int, user_id: int) -> AgentSession | None:
         return self.agent_session_repository.get_session_by_id_and_user_id(
             session_id=session_id,
             user_id=user_id,
         )
 
-    def list_session_messages(
-        self,
-        session_id: int,
-        user_id: int,
-    ) -> list[AgentMessage] | None:
+    def list_session_messages(self, session_id: int, user_id: int) -> list[AgentMessage] | None:
         session = self.get_user_session(session_id=session_id, user_id=user_id)
         if session is None:
             return None
-
         return self.agent_session_repository.list_messages_by_session_id(session_id)
 
     def send_message(
@@ -78,10 +75,9 @@ class AgentSessionService:
     ) -> tuple[AgentSession, AgentMessage, AgentMessage, bool, int | None]:
         try:
             if session_id is None:
-                session_title = content[:30]
                 session = self.agent_session_repository.create_session(
                     user_id=current_user.id,
-                    title=session_title,
+                    title=content[:30],
                 )
             else:
                 session = self.agent_session_repository.get_session_by_id_and_user_id(
@@ -185,17 +181,11 @@ class AgentSessionService:
                 tool_log = self.tool_execution_log_service.start_log(
                     session_id=session.id,
                     tool_name=tool.name,
-                    input_json={
-                        "user_id": current_user.id,
-                        "amount": amount,
-                    },
+                    input_json={"user_id": current_user.id, "amount": amount},
                 )
 
                 try:
-                    result = tool.run(
-                        user_id=current_user.id,
-                        amount=amount,
-                    )
+                    result = tool.run(user_id=current_user.id, amount=amount)
                     self.tool_execution_log_service.finish_log(
                         log=tool_log,
                         output_json=result,
@@ -210,7 +200,6 @@ class AgentSessionService:
                     raise
 
                 self.pending_action_repository.update_status(action=action, status="approved")
-
                 assistant_text = self.response_formatter.format(
                     intent="campus_card_topup",
                     result=result,
@@ -267,7 +256,6 @@ class AgentSessionService:
                     raise
 
                 self.pending_action_repository.update_status(action=action, status="approved")
-
                 assistant_text = self.response_formatter.format(
                     intent="leave_create",
                     result=result,
@@ -285,7 +273,6 @@ class AgentSessionService:
                         "result": result.get("data"),
                     },
                 )
-
             else:
                 raise ValueError(f"Unsupported action type: {action.action_type}")
 
@@ -312,9 +299,11 @@ class AgentSessionService:
         tool_registry = ToolRegistry()
         schedule_tool = QueryMyScheduleTool(self.schedule_service)
         balance_tool = QueryCampusCardBalanceTool(self.campus_card_service)
+        rag_tool = QueryPolicyKnowledgeTool(self.retriever, top_k=self.rag_top_k)
 
         tool_registry.register(schedule_tool)
         tool_registry.register(balance_tool)
+        tool_registry.register(rag_tool)
 
         intent = self.router.detect_intent(user_message)
 
@@ -322,16 +311,12 @@ class AgentSessionService:
         leave_days = self.router.extract_leave_days(user_message)
         leave_reason = self.router.extract_leave_reason(user_message)
 
-        # 规则抽不出来，再让 LLM 补
         llm_slots = {}
         if (
             (intent == "campus_card_topup" and not amount)
             or (intent == "leave_create" and (not leave_days or not leave_reason))
         ):
-            llm_slots = self.router.extract_slots_with_llm(
-                intent=intent,
-                message=user_message,
-            )
+            llm_slots = self.router.extract_slots_with_llm(intent=intent, message=user_message)
 
         if intent == "campus_card_topup" and not amount:
             amount = llm_slots.get("amount")
@@ -453,6 +438,31 @@ class AgentSessionService:
                     "result_total": result.get("total", 0),
                 },
             )
+            return self.response_formatter.format(intent=intent, result=result), False, None
+
+        if intent == "policy_qa":
+            items = result.get("items", [])
+            context_text = "\n\n".join(
+                f"[{item['filename']}] {item['content']}" for item in items
+            )
+
+            answer = self.llm_provider.answer_with_context(
+                user_name=current_user.full_name,
+                question=user_message,
+                context_text=context_text,
+            )
+
+            self.audit_service.record(
+                user_id=current_user.id,
+                action="policy.query",
+                target_type="agent_session",
+                target_id=session_id,
+                detail_json={
+                    "question": user_message,
+                    "result_total": result.get("total", 0),
+                },
+            )
+            return answer, False, None
 
         return self.response_formatter.format(intent=intent, result=result), False, None
 
@@ -508,5 +518,5 @@ class AgentSessionService:
             return (
                 f"你好，{user_name}。我已经收到你的消息：{user_message}。"
                 "当前这条消息还没有匹配到已实现的 Agent 工具能力，所以先返回一条 fallback 回复。"
-                "目前我已经开始支持“查课表”“校园卡充值”“请假申请”这三类请求。"
+                "目前我已经开始支持“查课表”“校园卡充值”“请假申请”“制度问答”这四类请求。"
             )

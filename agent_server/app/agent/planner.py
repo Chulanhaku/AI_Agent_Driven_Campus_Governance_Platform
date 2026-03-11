@@ -33,6 +33,15 @@ class Planner:
                 },
             }
 
+        if intent == "policy_qa":
+            return {
+                "action": "call_tool",
+                "tool_name": "query_policy_knowledge",
+                "params": {
+                    "question": context["message"],
+                },
+            }
+
         return {
             "action": "fallback",
         }

@@ -13,3 +13,13 @@ class BaseLlmProvider(ABC):
     @abstractmethod
     def generate_fallback_reply(self, *, user_name: str, message: str) -> str:
         raise NotImplementedError
+
+    @abstractmethod
+    def answer_with_context(
+        self,
+        *,
+        user_name: str,
+        question: str,
+        context_text: str,
+    ) -> str:
+        raise NotImplementedError

@@ -55,4 +55,14 @@ class ResponseFormatter:
                 f"状态：{data['status']}"
             )
 
+        if intent == "policy_qa" and result.get("success"):
+            items = result.get("items", [])
+            if not items:
+                return "我没有检索到相关制度材料。"
+
+            lines = ["我检索到了以下制度材料："]
+            for item in items:
+                lines.append(f"[{item['filename']}] {item['content']}")
+            return "\n\n".join(lines)
+
         return "我已经收到你的消息，但当前还没有匹配到具体业务能力，所以先进入普通回复模式。"

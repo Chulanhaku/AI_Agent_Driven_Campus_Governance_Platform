@@ -4,7 +4,7 @@ from app.lifecycle import lifespan
 from app.config.settings import get_settings
 from app.config.logging import setup_logging
 from app.config.constants import API_PREFIX
-from app.api.routers import audit, campus_card, health, leave, schedule,auth,chat
+from app.api.routers import admin, audit, auth, campus_card, chat, health, leave, schedule
 
 
 setup_logging()
@@ -23,3 +23,4 @@ app.include_router(chat.router, prefix=API_PREFIX)
 app.include_router(campus_card.router, prefix=API_PREFIX)
 app.include_router(leave.router, prefix=API_PREFIX)
 app.include_router(audit.router, prefix=API_PREFIX)
+app.include_router(admin.router, prefix=API_PREFIX)

@@ -1,3 +1,3 @@
-from . import health, schedule, auth,chat,campus_card,leave,audit
+from . import admin, audit, auth, campus_card, chat, health, leave, schedule
 
-__all__ = ["health","schedule","auth","chat","campus_card","leave","audit"]
+__all__ = ["admin", "audit", "auth", "campus_card", "chat", "health", "leave", "schedule"]

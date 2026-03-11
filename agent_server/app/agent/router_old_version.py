@@ -37,24 +37,12 @@ class AgentRouter:
             "制度",
             "规则",
             "要求",
-            "审批",
-            "流程",
-            "条件",
-            "几天",
-            "多久",
-            "超过",
             "怎么办",
-            "怎么处理",
             "如何处理",
-            "怎么申请",
-            "如何申请",
             "是否可以",
-            "可不可以",
-            "能不能",
-            "要不要",
-            "?",
-            "？",
         ]
+        if any(k in normalized for k in policy_keywords):
+            return "policy_qa"
 
         leave_keywords = [
             "请假",
@@ -63,6 +51,9 @@ class AgentRouter:
             "请事假",
             "leave",
         ]
+        for keyword in leave_keywords:
+            if keyword in normalized:
+                return "leave_create"
 
         topup_keywords = [
             "充值",
@@ -72,6 +63,9 @@ class AgentRouter:
             "topup",
             "recharge",
         ]
+        for keyword in topup_keywords:
+            if keyword in normalized:
+                return "campus_card_topup"
 
         schedule_keywords = [
             "课表",
@@ -83,25 +77,6 @@ class AgentRouter:
             "今天课表",
             "明天课表",
         ]
-
-        if "请假" in normalized and any(keyword in normalized for keyword in policy_keywords):
-            return "policy_qa"
-
-
-        if any(keyword in normalized for keyword in policy_keywords):
-            return "policy_qa"
-
-
-        for keyword in leave_keywords:
-            if keyword in normalized:
-                return "leave_create"
-
-
-        for keyword in topup_keywords:
-            if keyword in normalized:
-                return "campus_card_topup"
-
-
         for keyword in schedule_keywords:
             if keyword in normalized:
                 return "query_schedule"
@@ -115,34 +90,9 @@ class AgentRouter:
         return None
 
     def extract_leave_days(self, message: str) -> int | None:
-
         match = re.search(r"(\d+)\s*天", message)
         if match:
             return int(match.group(1))
-
-
-        if "半天" in message:
-            return 0
-
-
-        chinese_day_mapping = {
-            "一天": 1,
-            "两天": 2,
-            "二天": 2,
-            "三天": 3,
-            "四天": 4,
-            "五天": 5,
-            "六天": 6,
-            "七天": 7,
-            "八天": 8,
-            "九天": 9,
-            "十天": 10,
-        }
-
-        for text, days in chinese_day_mapping.items():
-            if text in message:
-                return days
-
         return None
 
     def extract_leave_reason(self, message: str) -> str | None:

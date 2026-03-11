@@ -28,6 +28,7 @@ class OpenAiProvider(BaseLlmProvider):
 - query_schedule
 - campus_card_topup
 - leave_create
+- policy_qa
 - fallback
 
 用户消息:
@@ -35,7 +36,7 @@ class OpenAiProvider(BaseLlmProvider):
 
 输出格式:
 {{
-  "intent": "query_schedule|campus_card_topup|leave_create|fallback",
+  "intent": "query_schedule|campus_card_topup|leave_create|policy_qa|fallback",
   "confidence": 0.0
 }}
 """.strip()
@@ -59,7 +60,7 @@ class OpenAiProvider(BaseLlmProvider):
 - reason: 字符串，无法提取则为 null
 - leave_type: 固定返回 "sick"
 
-如果 intent == query_schedule，可返回空对象。
+如果 intent == query_schedule 或 policy_qa，可返回空对象。
 
 用户消息:
 {message}
@@ -84,11 +85,35 @@ class OpenAiProvider(BaseLlmProvider):
 - 查课表
 - 校园卡充值
 - 请假申请
+- 制度问答
 
 用户姓名：{user_name}
 用户消息：{message}
 
 请直接给出回复正文。
+""".strip()
+
+        return self._chat(prompt).strip()
+
+    def answer_with_context(
+        self,
+        *,
+        user_name: str,
+        question: str,
+        context_text: str,
+    ) -> str:
+        prompt = f"""
+你是校园综合事务 AI 助手。
+请严格基于给定制度材料回答，不要编造材料中没有的信息。
+如果材料不足以回答，请明确说“根据当前检索到的制度材料，无法确定”。
+
+用户姓名：{user_name}
+用户问题：{question}
+
+制度材料：
+{context_text}
+
+请直接给出中文回答。
 """.strip()
 
         return self._chat(prompt).strip()
