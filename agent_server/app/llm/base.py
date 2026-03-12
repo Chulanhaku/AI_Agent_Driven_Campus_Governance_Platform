@@ -49,3 +49,15 @@ class BaseLlmProvider(ABC):
         memory_summary: str | None,
     ) -> str:
         raise NotImplementedError
+
+    @abstractmethod
+    def generate_execution_plan(
+        self,
+        *,
+        user_message: str,
+        available_tools: list[str],
+        primary_intent: str,
+        secondary_intents: list[str],
+        memory_summary: str | None,
+    ) -> dict:
+        raise NotImplementedError

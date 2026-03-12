@@ -1,47 +1,178 @@
+from app.agent.plan_schema import ExecutionPlanSchema
+from app.llm.base import BaseLlmProvider
+
+
 class Planner:
-    def build_plan(self, *, intent: str, context: dict) -> dict:
+    def __init__(self, llm_provider: BaseLlmProvider | None = None) -> None:
+        self.llm_provider = llm_provider
+
+    def build_plan(
+        self,
+        *,
+        intent: str,
+        context: dict,
+        use_llm_planner: bool = False,
+    ) -> dict:
+        if use_llm_planner and self.llm_provider is not None:
+            llm_plan = self._build_plan_by_llm(intent=intent, context=context)
+            if llm_plan is not None:
+                return llm_plan
+
+        return self._build_plan_by_rules(intent=intent, context=context)
+
+    def _build_plan_by_llm(
+        self,
+        *,
+        intent: str,
+        context: dict,
+    ) -> dict | None:
+        try:
+            raw_plan = self.llm_provider.generate_execution_plan(
+                user_message=context["message"],
+                available_tools=context.get("available_tools", []),
+                primary_intent=intent,
+                secondary_intents=context.get("secondary_intents", []),
+                memory_summary=context.get("memory", {}).get("summary_text"),
+            )
+
+            plan = self._validate_and_normalize_plan(raw_plan, context=context)
+            return plan
+        except Exception:
+            return None
+
+    def _build_plan_by_rules(
+        self,
+        *,
+        intent: str,
+        context: dict,
+    ) -> dict:
+        secondary_intents = context.get("secondary_intents", [])
+
         if intent == "query_schedule":
+            steps = [
+                {
+                    "type": "call_tool",
+                    "tool_name": "query_my_schedule",
+                    "params": {
+                        "user_id": context["current_user"]["id"],
+                        "semester": None,
+                        "weekday": None,
+                    },
+                }
+            ]
+
+            if "time_planning_advice" in secondary_intents:
+                steps.append(
+                    {
+                        "type": "reason",
+                        "goal": "time_planning_advice",
+                    }
+                )
+
+            if "weekly_busyness_analysis" in secondary_intents:
+                steps.append(
+                    {
+                        "type": "reason",
+                        "goal": "weekly_busyness_analysis",
+                    }
+                )
+
+            steps.append({"type": "compose"})
+
             return {
-                "action": "call_tool",
-                "tool_name": "query_my_schedule",
-                "params": {
-                    "user_id": context["current_user"]["id"],
-                    "semester": None,
-                    "weekday": None,
-                },
+                "plan_type": "multi_step",
+                "steps": steps,
             }
 
         if intent == "campus_card_topup":
             return {
-                "action": "create_pending_topup",
-                "params": {
-                    "user_id": context["current_user"]["id"],
-                    "session_id": context["session_id"],
-                    "amount": context.get("amount"),
-                },
+                "plan_type": "workflow",
+                "steps": [
+                    {
+                        "type": "create_pending_topup",
+                        "params": {
+                            "user_id": context["current_user"]["id"],
+                            "session_id": context["session_id"],
+                            "amount": context.get("amount"),
+                        },
+                    }
+                ],
             }
 
         if intent == "leave_create":
             return {
-                "action": "create_pending_leave",
-                "params": {
-                    "user_id": context["current_user"]["id"],
-                    "session_id": context["session_id"],
-                    "days": context.get("leave_days"),
-                    "reason": context.get("leave_reason"),
-                    "leave_type": "sick",
-                },
+                "plan_type": "workflow",
+                "steps": [
+                    {
+                        "type": "create_pending_leave",
+                        "params": {
+                            "user_id": context["current_user"]["id"],
+                            "session_id": context["session_id"],
+                            "days": context.get("leave_days"),
+                            "reason": context.get("leave_reason"),
+                            "leave_type": "sick",
+                        },
+                    }
+                ],
             }
 
         if intent == "policy_qa":
             return {
-                "action": "call_tool",
-                "tool_name": "query_policy_knowledge",
-                "params": {
-                    "question": context["message"],
-                },
+                "plan_type": "multi_step",
+                "steps": [
+                    {
+                        "type": "call_tool",
+                        "tool_name": "query_policy_knowledge",
+                        "params": {
+                            "question": context["message"],
+                        },
+                    },
+                    {
+                        "type": "compose",
+                    },
+                ],
             }
 
         return {
-            "action": "fallback",
+            "plan_type": "fallback",
+            "steps": [
+                {
+                    "type": "fallback",
+                }
+            ],
         }
+
+    def _validate_and_normalize_plan(
+        self,
+        raw_plan: dict,
+        *,
+        context: dict,
+    ) -> dict:
+        schema_obj = ExecutionPlanSchema(**raw_plan)
+        plan = schema_obj.model_dump()
+
+        allowed_tools = set(context.get("available_tools", []))
+        allowed_goals = {
+            "time_planning_advice",
+            "weekly_busyness_analysis",
+        }
+
+        for step in plan["steps"]:
+            step_type = step["type"]
+
+            if step_type == "call_tool":
+                tool_name = step.get("tool_name")
+                if tool_name not in allowed_tools:
+                    raise ValueError(f"Tool not allowed: {tool_name}")
+
+                params = step.get("params") or {}
+                if params.get("user_id") == "$CURRENT_USER_ID":
+                    params["user_id"] = context["current_user"]["id"]
+                step["params"] = params
+
+            elif step_type == "reason":
+                goal = step.get("goal")
+                if goal not in allowed_goals:
+                    raise ValueError(f"Reasoning goal not allowed: {goal}")
+
+        return plan

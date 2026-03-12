@@ -69,3 +69,22 @@ class LocalLlmProvider(BaseLlmProvider):
             f"这是基于当前工具结果整理的回复。"
             f"{extra_text}"
         )
+    
+
+    def generate_execution_plan(
+        self,
+        *,
+        user_message: str,
+        available_tools: list[str],
+        primary_intent: str,
+        secondary_intents: list[str],
+        memory_summary: str | None,
+    ) -> dict:
+        return {
+            "plan_type": "fallback",
+            "steps": [
+                {
+                    "type": "fallback",
+                }
+            ],
+        }

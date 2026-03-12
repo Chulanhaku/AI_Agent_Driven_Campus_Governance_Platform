@@ -187,6 +187,16 @@ class AgentRouter:
         if any(keyword in normalized for keyword in planning_keywords):
             results.append("time_planning_advice")
 
+        busyness_keywords = [
+            "哪天最忙",
+            "这周哪天最满",
+            "什么时候最忙",
+            "哪天课最多",
+        ]
+        if any(keyword in normalized for keyword in busyness_keywords):
+            results.append("weekly_busyness_analysis")
+
+
         summary_keywords = [
             "顺便告诉我",
             "另外",

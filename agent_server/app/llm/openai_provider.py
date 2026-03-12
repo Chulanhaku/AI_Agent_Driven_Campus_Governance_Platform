@@ -226,3 +226,72 @@ class OpenAiProvider(BaseLlmProvider):
 """.strip()
 
         return self._chat(prompt).strip()
+    
+
+    def generate_execution_plan(
+        self,
+        *,
+        user_message: str,
+        available_tools: list[str],
+        primary_intent: str,
+        secondary_intents: list[str],
+        memory_summary: str | None,
+    ) -> dict:
+        prompt = f"""
+你是一个校园事务 Agent 的执行计划生成器。
+请根据用户请求生成一个安全、简洁的执行计划。
+
+规则：
+1. 只允许输出 JSON
+2. 只允许以下 step.type:
+   - call_tool
+   - reason
+   - compose
+   - fallback
+3. 只允许以下工具名：
+   {available_tools}
+4. 只允许以下 reasoning goal：
+   - time_planning_advice
+   - weekly_busyness_analysis
+5. 不要生成任何未列出的工具或步骤
+6. 对于充值和请假这类需要确认的事务，不要在这里规划 create_pending_topup / create_pending_leave，仍由系统规则处理
+7. 如果不确定，就返回 fallback
+
+用户消息：
+{user_message}
+
+主意图：
+{primary_intent}
+
+附加意图：
+{secondary_intents}
+
+会话摘要：
+{memory_summary or "无"}
+
+输出格式示例：
+{{
+  "plan_type": "multi_step",
+  "steps": [
+    {{
+      "type": "call_tool",
+      "tool_name": "query_my_schedule",
+      "params": {{
+        "user_id": "$CURRENT_USER_ID",
+        "semester": null,
+        "weekday": null
+      }}
+    }},
+    {{
+      "type": "reason",
+      "goal": "time_planning_advice"
+    }},
+    {{
+      "type": "compose"
+    }}
+  ]
+}}
+""".strip()
+
+        content = self._chat(prompt)
+        return self.output_parser.parse_json(content)

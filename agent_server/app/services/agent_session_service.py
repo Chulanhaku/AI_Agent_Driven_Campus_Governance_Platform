@@ -55,7 +55,7 @@ class AgentSessionService:
 
         self.router = AgentRouter(llm_provider=llm_provider)
         self.context_builder = ContextBuilder()
-        self.planner = Planner()
+        self.planner = Planner(llm_provider=llm_provider)
         self.executor = Executor()
         self.response_formatter = ResponseFormatter()
         self.prompt_manager = PromptManager()
@@ -421,7 +421,7 @@ class AgentSessionService:
             tool_registry=tool_registry,
             memory_context=memory_context,
         )
-
+        context["secondary_intents"] = secondary_intents   # wait for test
         self.agent_memory_service.save_memory_snapshot(
             session_id=session_id,
             summary_text=memory_context.get("summary_text"),
@@ -433,21 +433,37 @@ class AgentSessionService:
         context["leave_days"] = leave_days
         context["leave_reason"] = leave_reason
 
-        plan = self.planner.build_plan(intent=intent, context=context)
+        use_llm_planner = self.prompt_manager.should_use_llm_planner(
+            primary_intent=intent,
+            secondary_intents=secondary_intents,
+            user_message=user_message,
+        )
 
-        if plan.get("action") == "create_pending_topup":
-            #wait for test
-            if amount:
-                self.memory_manager.save_slot_memory(
-                    session_id=session_id,
-                    pending_intent="campus_card_topup",
-                    intent_slots={
-                        "campus_card_topup": {
-                            "amount": amount,
-                        }
-                    },
-                )
-            #
+
+        plan = self.planner.build_plan(
+            intent=intent,
+            context=context,
+            use_llm_planner=use_llm_planner,
+        )
+
+        self.audit_service.record(
+            user_id=current_user.id,
+            action="agent.plan.generated",
+            target_type="agent_session",
+            target_id=session_id,
+            detail_json={
+                "intent": intent,
+                "secondary_intents": secondary_intents,
+                "use_llm_planner": use_llm_planner,
+                "plan": plan,
+            },
+        )
+
+
+        steps = plan.get("steps", [])
+        first_step_type = steps[0]["type"] if steps else "fallback"
+
+        if first_step_type == "create_pending_topup":
             if not amount:
                 return "我识别到你想充值校园卡，但没有解析到金额。比如你可以说：帮我充值 50 元。", False, None
 
@@ -480,25 +496,7 @@ class AgentSessionService:
             )
             return response_text, True, pending_action.id
 
-        if plan.get("action") == "create_pending_leave":
-            # wait for test
-            leave_slot_data = {}
-
-            if leave_days:
-                leave_slot_data["days"] = int(leave_days)
-
-            if leave_reason:
-                leave_slot_data["reason"] = str(leave_reason)
-
-            if leave_slot_data:
-                self.memory_manager.save_slot_memory(
-                    session_id=session_id,
-                    pending_intent="leave_create",
-                    intent_slots={
-                        "leave_create": leave_slot_data,
-                    },
-                )
-            #
+        if first_step_type == "create_pending_leave":
             if not leave_days:
                 return "我识别到你想请假，但没有解析到请假天数。比如你可以说：我要请假 2 天，原因是发烧。", False, None
 
@@ -537,23 +535,24 @@ class AgentSessionService:
                 },
             )
             return response_text, True, pending_action.id
-        
-        result = self._execute_logged_tool(
+
+        execution_result = self._execute_multistep_plan(
             session_id=session_id,
             plan=plan,
             tool_registry=tool_registry,
+            user_message=user_message,
         )
 
-        if intent == "fallback" or plan.get("action") == "fallback":
+        if execution_result.get("fallback"):
             return self._build_fallback_reply(
                 user_name=current_user.full_name,
                 user_message=user_message,
                 memory_context=memory_context,
             ), False, None
 
-        if not result.get("success"):
+        if not execution_result.get("success"):
             return "我识别到了你的业务请求，但执行过程中出了点问题。后面我们会补上更完整的错误处理。", False, None
-
+        
         if intent == "query_schedule":
             self.audit_service.record(
                 user_id=current_user.id,
@@ -562,13 +561,16 @@ class AgentSessionService:
                 target_id=session_id,
                 detail_json={
                     "message": user_message,
-                    "result_total": result.get("total", 0),
+                    "secondary_intents": secondary_intents,
                 },
             )
 
-            tool_result_summary = self.response_formatter.format(
-                intent=intent,
-                result=result,
+            tool_result_summary = self._build_tool_result_summary(
+                primary_intent=intent,
+                execution_result=execution_result,
+            )
+            reasoning_result_summary = self._build_reasoning_result_summary(
+                execution_result=execution_result,
             )
 
             final_reply = self.response_composer.compose(
@@ -577,20 +579,25 @@ class AgentSessionService:
                 primary_intent=intent,
                 secondary_intents=secondary_intents,
                 tool_result_summary=tool_result_summary,
+                reasoning_result_summary=reasoning_result_summary,
                 memory_summary=memory_context.get("summary_text"),
             )
             return final_reply, False, None
 
         if intent == "policy_qa":
-            items = result.get("items", [])
-            context_text = "\n\n".join(
-                f"[{item['filename']}] {item['content']}" for item in items
+            tool_result_summary = self._build_tool_result_summary(
+                primary_intent=intent,
+                execution_result=execution_result,
             )
 
-            answer = self.llm_provider.answer_with_context(
+            final_reply = self.response_composer.compose(
                 user_name=current_user.full_name,
-                question=user_message,
-                context_text=context_text,
+                user_message=user_message,
+                primary_intent=intent,
+                secondary_intents=secondary_intents,
+                tool_result_summary=tool_result_summary,
+                reasoning_result_summary=None,
+                memory_summary=memory_context.get("summary_text"),
             )
 
             self.audit_service.record(
@@ -600,12 +607,13 @@ class AgentSessionService:
                 target_id=session_id,
                 detail_json={
                     "question": user_message,
-                    "result_total": result.get("total", 0),
+                    "secondary_intents": secondary_intents,
                 },
             )
-            return answer, False, None
 
-        return self.response_formatter.format(intent=intent, result=result), False, None
+            return final_reply, False, None
+
+        return self.response_formatter.format(intent=intent, result=execution_result), False, None
     
     # old query
         # result = self._execute_logged_tool(
@@ -728,6 +736,110 @@ class AgentSessionService:
                 status="failed",
             )
             raise
+    
+    def _execute_multistep_plan(
+        self,
+        *,
+        session_id: int,
+        plan: dict,
+        tool_registry: ToolRegistry,
+        user_message: str,
+    ) -> dict:
+        steps = plan.get("steps", [])
+
+        tool_results: dict = {}
+        reasoning_results: dict = {}
+
+        for step in steps:
+            step_type = step.get("type")
+
+            if step_type == "call_tool":
+                tool_name = step["tool_name"]
+                params = step.get("params", {})
+
+                tool_log = self.tool_execution_log_service.start_log(
+                    session_id=session_id,
+                    tool_name=tool_name,
+                    input_json=params,
+                )
+
+                try:
+                    tool = tool_registry.get(tool_name)
+                    if tool is None:
+                        self.tool_execution_log_service.finish_log(
+                            log=tool_log,
+                            output_json={"error": f"Tool not found: {tool_name}"},
+                            status="failed",
+                        )
+                        return {
+                            "success": False,
+                            "error": f"Tool not found: {tool_name}",
+                            "tool_results": tool_results,
+                            "reasoning_results": reasoning_results,
+                        }
+
+                    result = tool.run(**params)
+                    tool_results[tool_name] = result
+
+                    self.tool_execution_log_service.finish_log(
+                        log=tool_log,
+                        output_json=result,
+                        status="success" if result.get("success") else "failed",
+                    )
+
+                    if not result.get("success"):
+                        return {
+                            "success": False,
+                            "error": f"Tool execution failed: {tool_name}",
+                            "tool_results": tool_results,
+                            "reasoning_results": reasoning_results,
+                        }
+
+                except Exception as exc:
+                    self.tool_execution_log_service.finish_log(
+                        log=tool_log,
+                        output_json={"error": str(exc)},
+                        status="failed",
+                    )
+                    raise
+
+            elif step_type == "reason":
+                goal = step["goal"]
+                result = self.executor.reasoning_engine.reason(
+                    goal=goal,
+                    tool_results=tool_results,
+                    user_message=user_message,
+                )
+                reasoning_results[goal] = result
+
+            elif step_type == "compose":
+                continue
+
+            elif step_type == "fallback":
+                return {
+                    "success": False,
+                    "fallback": True,
+                    "tool_results": tool_results,
+                    "reasoning_results": reasoning_results,
+                }
+
+            elif step_type in {"create_pending_topup", "create_pending_leave"}:
+                return {
+                    "success": True,
+                    "workflow_step": step,
+                    "tool_results": tool_results,
+                    "reasoning_results": reasoning_results,
+                }
+
+        return {
+            "success": True,
+            "tool_results": tool_results,
+            "reasoning_results": reasoning_results,
+        }
+
+
+
+
 
     def _build_fallback_reply(
         self,
@@ -764,3 +876,59 @@ class AgentSessionService:
                 f"你好，{user_name}。我已经收到你的消息：{user_message}。"
                 "当前这条消息还没有匹配到已实现的 Agent 工具能力，所以先返回一条 fallback 回复。"
             )
+
+
+    def _build_tool_result_summary(
+        self,
+        *,
+        primary_intent: str,
+        execution_result: dict,
+    ) -> str:
+        tool_results = execution_result.get("tool_results", {})
+
+        if primary_intent == "query_schedule":
+            schedule_result = tool_results.get("query_my_schedule", {})
+            return self.response_formatter.format(
+                intent="query_schedule",
+                result=schedule_result,
+            )
+
+        if primary_intent == "policy_qa":
+            policy_result = tool_results.get("query_policy_knowledge", {})
+            return self.response_formatter.format(
+                intent="policy_qa",
+                result=policy_result,
+            )
+
+        return "已完成相关工具调用。"
+
+    def _build_reasoning_result_summary(
+        self,
+        *,
+        execution_result: dict,
+    ) -> str:
+        reasoning_results = execution_result.get("reasoning_results", {})
+        lines: list[str] = []
+
+        if "time_planning_advice" in reasoning_results:
+            result = reasoning_results["time_planning_advice"]
+            if result.get("success"):
+                items = result.get("items", [])
+                for item in items:
+                    lines.append(
+                        f"{item['course_name']}（星期{item['weekday']} {item['class_start_time']}）"
+                        f"建议约 {item['suggested_departure_time']} 出门。"
+                    )
+
+        if "weekly_busyness_analysis" in reasoning_results:
+            result = reasoning_results["weekly_busyness_analysis"]
+            if result.get("success"):
+                busiest_weekday = result.get("busiest_weekday")
+                weekday_count = result.get("weekday_count", {})
+                if busiest_weekday is not None:
+                    lines.append(
+                        f"课表分析显示，星期{busiest_weekday} 课程最多，"
+                        f"当天共有 {weekday_count.get(busiest_weekday, 0)} 节安排。"
+                    )
+
+        return "\n".join(lines)
