@@ -5,9 +5,9 @@ class ResponseFormatter:
             total = result.get("total", 0)
 
             if total == 0:
-                return "我查到了你的课表数据，但当前条件下没有课程安排。"
+                return "当前条件下没有课程安排。"
 
-            lines = [f"我查到了 {total} 条课表记录："]
+            lines = [f"共查询到 {total} 条课表记录："]
             for item in items:
                 course = item["course"]
                 lines.append(
@@ -58,11 +58,11 @@ class ResponseFormatter:
         if intent == "policy_qa" and result.get("success"):
             items = result.get("items", [])
             if not items:
-                return "我没有检索到相关制度材料。"
+                return "没有检索到相关制度材料。"
 
-            lines = ["我检索到了以下制度材料："]
+            lines = ["检索到以下制度材料："]
             for item in items:
                 lines.append(f"[{item['filename']}] {item['content']}")
             return "\n\n".join(lines)
 
-        return "我已经收到你的消息，但当前还没有匹配到具体业务能力，所以先进入普通回复模式。"
+        return "当前没有可用的工具结果摘要。"

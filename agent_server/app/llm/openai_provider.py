@@ -1,9 +1,12 @@
+import logging
 from openai import OpenAI
+import time
 
 from app.config.settings import get_settings
 from app.llm.base import BaseLlmProvider
 from app.llm.output_parser import OutputParser
 
+logger = logging.getLogger("app.llm")
 
 class OpenAiProvider(BaseLlmProvider):
     def __init__(self) -> None:
@@ -119,6 +122,16 @@ class OpenAiProvider(BaseLlmProvider):
         return self._chat(prompt).strip()
 
     def _chat(self, prompt: str) -> str:
+        start_time = time.perf_counter()
+        prompt_len = len(prompt)
+        trace_name = f"openai_{self.model}"
+
+        logger.info(
+            "[llm_call_start] trace_name=%s model=%s prompt_len=%s",
+            trace_name,
+            self.model,
+            prompt_len,
+        )
         response = self.client.chat.completions.create(
             model=self.model,
             messages=[
@@ -126,5 +139,90 @@ class OpenAiProvider(BaseLlmProvider):
                 {"role": "user", "content": prompt},
             ],
             temperature=0,
+            extra_body={
+                "enable_thinking": False
+            }
+        )
+
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+
+        logger.info(
+            "[llm_call_end] trace_name=%s cost_ms=%.2f",
+            trace_name,
+            elapsed_ms,
         )
         return response.choices[0].message.content or ""
+    
+    def generate_session_title(self, *, messages_text: str) -> str:
+        prompt = f"""
+请根据下面的对话内容，生成一个简短中文会话标题。
+要求：
+1. 不超过 12 个字
+2. 直接输出标题，不要加引号，不要解释
+3. 标题要体现主要事务主题
+
+对话内容：
+{messages_text}
+""".strip()
+
+        return self._chat(prompt).strip()
+
+    def summarize_session(
+        self,
+        *,
+        existing_summary: str,
+        recent_messages_text: str,
+    ) -> str:
+        prompt = f"""
+你是一个会话摘要器。
+请基于已有摘要和最近对话，输出更新后的会话摘要。
+要求：
+1. 使用中文
+2. 控制在 120 字以内
+3. 保留关键意图、关键槽位、当前状态
+4. 直接输出摘要正文，不要解释
+
+已有摘要：
+{existing_summary or "无"}
+
+最近对话：
+{recent_messages_text}
+""".strip()
+
+        return self._chat(prompt).strip()
+    
+    def compose_tool_response(
+        self,
+        *,
+        user_name: str,
+        user_message: str,
+        primary_intent: str,
+        secondary_intents: list[str],
+        tool_result_summary: str,
+        memory_summary: str | None,
+    ) -> str:
+        prompt = f"""
+你是校园综合事务 AI 助手。
+请基于工具结果和用户原始需求，生成自然、简洁、有帮助的中文回复。
+
+要求：
+1. 必须回应用户原始问题
+2. 不要只机械复述结构化结果
+3. 如果用户除了主任务外还有附加诉求，也要一起回应
+4. 不要编造工具结果中没有的事实
+5. 可以给出合理建议，但要明确这是建议
+6. 输出自然中文，不要写“根据工具结果”这种生硬说法
+
+用户姓名：{user_name}
+用户原始消息：{user_message}
+主意图：{primary_intent}
+附加意图：{secondary_intents}
+会话摘要：{memory_summary or "无"}
+
+工具结果摘要：
+{tool_result_summary}
+
+请直接输出最终回复正文。
+""".strip()
+
+        return self._chat(prompt).strip()

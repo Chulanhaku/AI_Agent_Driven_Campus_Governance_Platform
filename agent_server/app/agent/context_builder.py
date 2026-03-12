@@ -32,5 +32,7 @@ class ContextBuilder:
                 "recent_messages": [],
                 "recent_message_count": 0,
                 "slot_memory": {},
+                "summary_text": "" ,
+                # "current_intent": None,    intent 由 LLM 输出，初始值不设定为 None，避免被误用为“已明确无意图”
             },
         }

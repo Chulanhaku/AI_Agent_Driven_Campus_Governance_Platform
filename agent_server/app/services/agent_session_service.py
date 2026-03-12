@@ -22,11 +22,16 @@ from app.tools.schedule_tools import QueryMyScheduleTool
 from app.workflows.leave_workflow import LeaveWorkflow
 from app.workflows.recharge_workflow import RechargeWorkflow
 from app.agent.memory import MemoryManager
+from app.db.repositories.agent_session_memory_repository import AgentSessionMemoryRepository
+from app.services.agent_memory_service import AgentMemoryService
+from app.agent.session_manager import SessionSummaryManager
+from app.agent.response_composer import ResponseComposer
 
 class AgentSessionService:
     def __init__(
         self,
         agent_session_repository: AgentSessionRepository,
+        agent_memory_service: AgentMemoryService,    #addded
         pending_action_repository: PendingActionRepository,
         schedule_service: ScheduleService,
         campus_card_service: CampusCardService,
@@ -55,6 +60,11 @@ class AgentSessionService:
         self.response_formatter = ResponseFormatter()
         self.prompt_manager = PromptManager()
         self.memory_manager = MemoryManager(agent_session_repository)
+        #added
+        self.agent_memory_service = agent_memory_service
+        self.memory_manager = MemoryManager(agent_session_repository)
+        self.session_summary_manager = SessionSummaryManager(llm_provider)
+        self.response_composer = ResponseComposer(llm_provider)
 
     def get_user_session(self, session_id: int, user_id: int) -> AgentSession | None:
         return self.agent_session_repository.get_session_by_id_and_user_id(
@@ -107,6 +117,37 @@ class AgentSessionService:
                 content=assistant_reply_text,
                 message_type="text",
             )
+
+            recent_memory_context = self.memory_manager.build_memory_context(
+                session_id=session.id,
+                limit=8,
+            )
+
+            # 只在 title 为空或过于原始时更新标题
+            if not session.title or session.title == content[:30]:
+                generated_title = self.session_summary_manager.generate_title(
+                    recent_messages=recent_memory_context.get("recent_messages", []),
+                )
+                self.agent_session_repository.update_title(
+                    session=session,
+                    title=generated_title,
+                )
+
+            existing_memory = self.agent_memory_service.get_session_memory(session.id)
+            existing_summary = existing_memory.summary_text if existing_memory else ""
+
+            generated_summary = self.session_summary_manager.generate_summary(
+                existing_summary=existing_summary or "",
+                recent_messages=recent_memory_context.get("recent_messages", []),
+            )
+
+            self.agent_memory_service.save_memory_snapshot(
+                session_id=session.id,
+                summary_text=generated_summary,
+                current_intent=recent_memory_context.get("current_intent"),
+                slot_snapshot_json=recent_memory_context.get("slot_memory"),
+            )
+
 
             self.agent_session_repository.commit()
             return session, user_message, assistant_message, requires_confirmation, action_id
@@ -307,13 +348,27 @@ class AgentSessionService:
         tool_registry.register(rag_tool)
 
         intent = self.router.detect_intent(user_message)
+        secondary_intents = self.router.detect_secondary_intents(user_message)
 
         amount = self.router.extract_amount(user_message)
         leave_days = self.router.extract_leave_days(user_message)
         leave_reason = self.router.extract_leave_reason(user_message)
+
+
+        persisted_memory_obj = self.agent_memory_service.get_session_memory(session_id)
+        persisted_memory = None
+
+        if persisted_memory_obj is not None:
+            persisted_memory = {
+                "summary_text": persisted_memory_obj.summary_text,
+                "current_intent": persisted_memory_obj.current_intent,
+                "slot_snapshot_json": persisted_memory_obj.slot_snapshot_json,
+            }
+
         memory_context = self.memory_manager.build_memory_context(
             session_id=session_id,
             limit=8,
+            persisted_memory=persisted_memory,
         )
         slot_memory = memory_context.get("slot_memory", {})
 
@@ -365,6 +420,13 @@ class AgentSessionService:
             message=user_message,
             tool_registry=tool_registry,
             memory_context=memory_context,
+        )
+
+        self.agent_memory_service.save_memory_snapshot(
+            session_id=session_id,
+            summary_text=memory_context.get("summary_text"),
+            current_intent=memory_context.get("current_intent"),
+            slot_snapshot_json=memory_context.get("slot_memory"),
         )
         context["session_id"] = session_id
         context["amount"] = amount
@@ -475,7 +537,7 @@ class AgentSessionService:
                 },
             )
             return response_text, True, pending_action.id
-
+        
         result = self._execute_logged_tool(
             session_id=session_id,
             plan=plan,
@@ -503,7 +565,21 @@ class AgentSessionService:
                     "result_total": result.get("total", 0),
                 },
             )
-            return self.response_formatter.format(intent=intent, result=result), False, None
+
+            tool_result_summary = self.response_formatter.format(
+                intent=intent,
+                result=result,
+            )
+
+            final_reply = self.response_composer.compose(
+                user_name=current_user.full_name,
+                user_message=user_message,
+                primary_intent=intent,
+                secondary_intents=secondary_intents,
+                tool_result_summary=tool_result_summary,
+                memory_summary=memory_context.get("summary_text"),
+            )
+            return final_reply, False, None
 
         if intent == "policy_qa":
             items = result.get("items", [])
@@ -530,6 +606,91 @@ class AgentSessionService:
             return answer, False, None
 
         return self.response_formatter.format(intent=intent, result=result), False, None
+    
+    # old query
+        # result = self._execute_logged_tool(
+        #     session_id=session_id,
+        #     plan=plan,
+        #     tool_registry=tool_registry,
+        # )
+
+        # if intent == "fallback" or plan.get("action") == "fallback":
+        #     return self._build_fallback_reply(
+        #         user_name=current_user.full_name,
+        #         user_message=user_message,
+        #         memory_context=memory_context,
+        #     ), False, None
+
+        # if not result.get("success"):
+        #     return "我识别到了你的业务请求，但执行过程中出了点问题。后面我们会补上更完整的错误处理。", False, None
+
+        # if intent == "query_schedule":
+        #     self.audit_service.record(
+        #         user_id=current_user.id,
+        #         action="schedule.query",
+        #         target_type="agent_session",
+        #         target_id=session_id,
+        #         detail_json={
+        #             "message": user_message,
+        #             "result_total": result.get("total", 0),
+        #         },
+        #     )
+
+        #     #
+        #     # tool_result_summary = self.response_formatter.format(intent=intent, result=result)
+
+        #     # secondary_intents = self.router.detect_secondary_intents(user_message)
+
+        #     # if secondary_intents:
+        #     #     reply = self.llm_provider.compose_tool_response(
+        #     #         user_name=current_user.full_name,
+        #     #         user_message=user_message,
+        #     #         primary_intent=intent,
+        #     #         secondary_intents=secondary_intents,
+        #     #         tool_result_summary=tool_result_summary,
+        #     #         memory_summary=memory_context.get("summary_text"),
+        #     #     )
+        #     #     return reply, False, None
+
+
+        #     # reply = self.llm_provider.compose_tool_response(
+        #     #     user_name=current_user.full_name,
+        #     #     user_message=user_message,
+        #     #     primary_intent=intent,
+        #     #     secondary_intents=[],
+        #     #     tool_result_summary=tool_result_summary,
+        #     #     memory_summary=memory_context.get("summary_text"),
+        #     # )
+        #     # return reply, False, None
+        #     #
+
+        #     return self.response_formatter.format(intent=intent, result=result), False, None
+
+        # if intent == "policy_qa":
+        #     items = result.get("items", [])
+        #     context_text = "\n\n".join(
+        #         f"[{item['filename']}] {item['content']}" for item in items
+        #     )
+
+        #     answer = self.llm_provider.answer_with_context(
+        #         user_name=current_user.full_name,
+        #         question=user_message,
+        #         context_text=context_text,
+        #     )
+
+        #     self.audit_service.record(
+        #         user_id=current_user.id,
+        #         action="policy.query",
+        #         target_type="agent_session",
+        #         target_id=session_id,
+        #         detail_json={
+        #             "question": user_message,
+        #             "result_total": result.get("total", 0),
+        #         },
+        #     )
+        #     return answer, False, None
+
+        # return self.response_formatter.format(intent=intent, result=result), False, None
 
     def _execute_logged_tool(
         self,
@@ -576,6 +737,7 @@ class AgentSessionService:
         memory_context: dict | None = None,
     ) -> str:
         recent_messages = memory_context.get("recent_messages", []) if memory_context else []
+        summary_text = memory_context.get("summary_text", "") if memory_context else ""
 
         memory_text = ""
         if recent_messages:
@@ -584,16 +746,18 @@ class AgentSessionService:
                 lines.append(f"{item['role']}: {item['content']}")
             memory_text = "\n".join(lines)
 
-        try:
-            if memory_text:
-                return self.llm_provider.generate_fallback_reply(
-                    user_name=user_name,
-                    message=f"最近对话：\n{memory_text}\n\n用户当前消息：{user_message}",
-                )
+        prompt_message = user_message
+        if summary_text or memory_text:
+            prompt_message = (
+                f"会话摘要：{summary_text}\n\n"
+                f"最近对话：\n{memory_text}\n\n"
+                f"用户当前消息：{user_message}"
+            )
 
+        try:
             return self.llm_provider.generate_fallback_reply(
                 user_name=user_name,
-                message=user_message,
+                message=prompt_message,
             )
         except Exception:
             return (

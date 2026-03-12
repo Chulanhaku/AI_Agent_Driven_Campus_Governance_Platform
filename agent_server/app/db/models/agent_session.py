@@ -23,3 +23,9 @@ class AgentSession(Base, TimestampMixin):
         cascade="all, delete-orphan",
         order_by="AgentMessage.id.asc()",
     )
+    memory = relationship(
+        "AgentSessionMemory",
+        back_populates="session",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )

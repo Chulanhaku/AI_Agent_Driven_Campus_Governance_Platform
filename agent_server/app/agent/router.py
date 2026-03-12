@@ -169,3 +169,35 @@ class AgentRouter:
             return self.llm_provider.extract_slots(intent=intent, message=message)
         except Exception:
             return {}
+        
+    def detect_secondary_intents(self, message: str) -> list[str]:
+        normalized = message.strip().lower()
+        results: list[str] = []
+
+        planning_keywords = [
+            "几点出门",
+            "怎么安排时间",
+            "安排一下",
+            "帮我规划",
+            "时间安排",
+            "怎么去",
+            "多久出门",
+            "定",
+        ]
+        if any(keyword in normalized for keyword in planning_keywords):
+            results.append("time_planning_advice")
+
+        summary_keywords = [
+            "顺便告诉我",
+            "另外",
+            "并且",
+            "并安排",
+            "顺便安排",
+        ]
+        if any(keyword in normalized for keyword in summary_keywords):
+            if "time_planning_advice" not in results and any(
+                keyword in normalized for keyword in planning_keywords
+            ):
+                results.append("time_planning_advice")
+
+        return results

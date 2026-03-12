@@ -26,6 +26,8 @@ from app.services.campus_card_service import CampusCardService
 from app.services.leave_service import LeaveService
 from app.services.schedule_service import ScheduleService
 from app.services.tool_execution_log_service import ToolExecutionLogService
+from app.db.repositories.agent_session_memory_repository import AgentSessionMemoryRepository
+from app.services.agent_memory_service import AgentMemoryService
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -50,9 +52,12 @@ def get_agent_session_service(
     leave_service = LeaveService(leave_repository)
     audit_service = AuditService(audit_log_repository)
     tool_execution_log_service = ToolExecutionLogService(tool_execution_log_repository)
+    memory_repository = AgentSessionMemoryRepository(db)
+    agent_memory_service = AgentMemoryService(memory_repository)
 
     return AgentSessionService(
         agent_session_repository=agent_session_repository,
+        agent_memory_service=agent_memory_service,          
         pending_action_repository=pending_action_repository,
         schedule_service=schedule_service,
         campus_card_service=campus_card_service,

@@ -44,6 +44,16 @@ class AgentSessionRepository:
             .first()
         )
 
+    def update_title(
+        self,
+        *,
+        session: AgentSession,
+        title: str,
+    ) -> AgentSession:
+        session.title = title
+        self.db.flush()
+        return session
+
     def add_message(
         self,
         session_id: int,

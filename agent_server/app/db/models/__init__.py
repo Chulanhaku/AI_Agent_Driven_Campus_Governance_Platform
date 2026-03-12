@@ -12,6 +12,7 @@ from .agent_message import AgentMessage
 from .pending_action import PendingAction
 from .tool_execution_log import ToolExecutionLog
 from .audit_log import AuditLog
+from .agent_session_memory import AgentSessionMemory
 
 __all__ = [
     "Role",
@@ -32,4 +33,5 @@ __all__ = [
     "ApprovalRecord",
     "AuditLog",
     "ToolExecutionLog",
+    "AgentSessionMemory",
 ]

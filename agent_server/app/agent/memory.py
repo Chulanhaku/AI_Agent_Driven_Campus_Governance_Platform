@@ -22,6 +22,7 @@ class MemoryManager:
         *,
         session_id: int,
         limit: int = 8,
+        persisted_memory: dict | None = None,
     ) -> dict:
         messages = self.get_recent_messages(session_id=session_id, limit=limit)
 
@@ -37,11 +38,99 @@ class MemoryManager:
 
         slot_memory = self._extract_slot_memory(serialized_messages)
 
+        # 持久化快照优先补位
+        persisted_slots = (persisted_memory or {}).get("slot_snapshot_json") or {}
+        merged_slot_memory = self._merge_slot_memory(
+            persisted_slot_memory=persisted_slots,
+            runtime_slot_memory=slot_memory,
+        )
+
+        summary_text = self._build_summary_text(
+            recent_messages=serialized_messages,
+            slot_memory=merged_slot_memory,
+            persisted_summary=(persisted_memory or {}).get("summary_text"),
+        )
+
+        current_intent = merged_slot_memory.get("pending_intent")
+
         return {
             "recent_messages": serialized_messages,
             "recent_message_count": len(serialized_messages),
-            "slot_memory": slot_memory,
+            "slot_memory": merged_slot_memory,
+            "summary_text": summary_text,
+            "current_intent": current_intent,
         }
+
+    def _merge_slot_memory(
+        self,
+        *,
+        persisted_slot_memory: dict,
+        runtime_slot_memory: dict,
+    ) -> dict:
+        merged = {
+            "pending_intent": runtime_slot_memory.get("pending_intent")
+            or persisted_slot_memory.get("pending_intent"),
+            "campus_card_topup": {
+                "amount": (
+                    runtime_slot_memory.get("campus_card_topup", {}).get("amount")
+                    or persisted_slot_memory.get("campus_card_topup", {}).get("amount")
+                ),
+            },
+            "leave_create": {
+                "days": (
+                    runtime_slot_memory.get("leave_create", {}).get("days")
+                    or persisted_slot_memory.get("leave_create", {}).get("days")
+                ),
+                "reason": (
+                    runtime_slot_memory.get("leave_create", {}).get("reason")
+                    or persisted_slot_memory.get("leave_create", {}).get("reason")
+                ),
+                "leave_type": (
+                    runtime_slot_memory.get("leave_create", {}).get("leave_type")
+                    or persisted_slot_memory.get("leave_create", {}).get("leave_type")
+                    or "sick"
+                ),
+            },
+        }
+        return merged
+
+    def _build_summary_text(
+        self,
+        *,
+        recent_messages: list[dict],
+        slot_memory: dict,
+        persisted_summary: str | None,
+    ) -> str:
+        parts = []
+
+        pending_intent = slot_memory.get("pending_intent")
+        if pending_intent:
+            parts.append(f"当前主要意图：{pending_intent}")
+
+        topup_amount = slot_memory.get("campus_card_topup", {}).get("amount")
+        if topup_amount:
+            parts.append(f"已知充值金额：{topup_amount}")
+
+        leave_days = slot_memory.get("leave_create", {}).get("days")
+        leave_reason = slot_memory.get("leave_create", {}).get("reason")
+        if leave_days:
+            parts.append(f"已知请假天数：{leave_days}")
+        if leave_reason:
+            parts.append(f"已知请假原因：{leave_reason}")
+
+        if recent_messages:
+            last_user_messages = [
+                item["content"]
+                for item in recent_messages
+                if item["role"] == "user"
+            ][-2:]
+            if last_user_messages:
+                parts.append(f"最近用户消息：{' | '.join(last_user_messages)}")
+
+        if persisted_summary and not parts:
+            return persisted_summary
+
+        return "；".join(parts) if parts else (persisted_summary or "")
 
     def _extract_slot_memory(self, messages: list[dict]) -> dict:
         slot_memory = {
@@ -65,27 +154,21 @@ class MemoryManager:
 
             normalized = content.strip().lower()
 
-            # ---- intent memory ----
             if any(keyword in normalized for keyword in ["请假", "请病假", "请事假", "leave"]):
                 slot_memory["pending_intent"] = "leave_create"
-
             elif any(keyword in normalized for keyword in ["充值", "充钱", "充校园卡", "校园卡充值", "topup", "recharge"]):
                 slot_memory["pending_intent"] = "campus_card_topup"
-
             elif any(keyword in normalized for keyword in ["课表", "课程表", "schedule"]):
                 slot_memory["pending_intent"] = "query_schedule"
 
-            # ---- topup amount ----
             amount = self._extract_amount(content)
             if amount is not None:
                 slot_memory["campus_card_topup"]["amount"] = amount
 
-            # ---- leave days ----
             days = self._extract_leave_days(content)
             if days is not None:
                 slot_memory["leave_create"]["days"] = days
 
-            # ---- leave reason ----
             reason = self._extract_leave_reason(content)
             if reason is not None:
                 slot_memory["leave_create"]["reason"] = reason
@@ -119,7 +202,6 @@ class MemoryManager:
                     return reason
 
         return None
-    
 
 # add save slot
     def save_slot_memory(

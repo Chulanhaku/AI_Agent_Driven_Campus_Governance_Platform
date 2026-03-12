@@ -23,3 +23,29 @@ class BaseLlmProvider(ABC):
         context_text: str,
     ) -> str:
         raise NotImplementedError
+
+    @abstractmethod
+    def generate_session_title(self, *, messages_text: str) -> str:
+        raise NotImplementedError
+
+    @abstractmethod
+    def summarize_session(
+        self,
+        *,
+        existing_summary: str,
+        recent_messages_text: str,
+    ) -> str:
+        raise NotImplementedError
+
+    @abstractmethod
+    def compose_tool_response(
+        self,
+        *,
+        user_name: str,
+        user_message: str,
+        primary_intent: str,
+        secondary_intents: list[str],
+        tool_result_summary: str,
+        memory_summary: str | None,
+    ) -> str:
+        raise NotImplementedError
