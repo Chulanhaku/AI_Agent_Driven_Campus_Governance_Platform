@@ -26,10 +26,16 @@ from app.db.repositories.agent_session_memory_repository import AgentSessionMemo
 from app.services.agent_memory_service import AgentMemoryService
 from app.agent.session_manager import SessionSummaryManager
 from app.agent.response_composer import ResponseComposer
+<<<<<<< HEAD
 from app.services.course_plan_service import CoursePlanService
 from app.tools.course_plan_tools import GenerateCoursePlanTool, SubmitCoursePlanTool
 from app.services.course_enrollment_service import CourseEnrollmentService
 from app.workflows.course_plan_workflow import CoursePlanWorkflow
+=======
+from app.services.notification_service import NotificationService
+from app.tools.notification_tools import ExecuteSendNotificationTool
+
+>>>>>>> 5f7fd58 (feat: wip(work in progress) - add notification service and tool structure)
 
 class AgentSessionService:
     def __init__(
@@ -71,6 +77,7 @@ class AgentSessionService:
         self.memory_manager = MemoryManager(agent_session_repository)
         self.session_summary_manager = SessionSummaryManager(llm_provider)
         self.response_composer = ResponseComposer(llm_provider)
+        self.notification_service = NotificationService()
 
         self.course_plan_service = course_plan_service
         self.course_enrollment_service = course_enrollment_service
@@ -405,12 +412,20 @@ class AgentSessionService:
         schedule_tool = QueryMyScheduleTool(self.schedule_service)
         balance_tool = QueryCampusCardBalanceTool(self.campus_card_service)
         rag_tool = QueryPolicyKnowledgeTool(self.retriever, top_k=self.rag_top_k)
+<<<<<<< HEAD
         course_plan_tool = GenerateCoursePlanTool(self.course_plan_service)
+=======
+        notification_tool = ExecuteSendNotificationTool(self.notification_service)
+>>>>>>> 5f7fd58 (feat: wip(work in progress) - add notification service and tool structure)
 
         tool_registry.register(schedule_tool)
         tool_registry.register(balance_tool)
         tool_registry.register(rag_tool)
+<<<<<<< HEAD
         tool_registry.register(course_plan_tool)
+=======
+        tool_registry.register(notification_tool)
+>>>>>>> 5f7fd58 (feat: wip(work in progress) - add notification service and tool structure)
 
         intent = self.router.detect_intent(user_message)
         secondary_intents = self.router.detect_secondary_intents(user_message)

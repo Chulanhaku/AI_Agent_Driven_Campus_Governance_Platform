@@ -26,6 +26,7 @@ class ContextBuilder:
                 "campus_card_topup",
                 "leave_create",
                 "policy_qa",
+                "send_notification",
                 "fallback",
                 "course_plan_generate",
             ],

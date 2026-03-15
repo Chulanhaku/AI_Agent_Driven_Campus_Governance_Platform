@@ -102,5 +102,13 @@ class ResponseFormatter:
             for item in items:
                 lines.append(f"[{item['filename']}] {item['content']}")
             return "\n\n".join(lines)
+        
+        if intent == "send_notification" and result.get("success"):
+            data = result.get("data", {})
+            return (
+                f"通知发送成功！\n"
+                f"接收用户ID：{data.get('user_id')}\n"
+                f"消息内容：{data.get('message')}"
+            )
 
         return "当前没有可用的工具结果摘要。"
