@@ -61,6 +61,12 @@ class MemoryManager:
             "current_intent": current_intent,
         }
 
+    def _extract_plan_index(self, message: str) -> int | None:
+        match = re.search(r"方案\s*(\d+)", message)
+        if match:
+            return int(match.group(1))
+        return None
+
     def _merge_slot_memory(
         self,
         *,
@@ -89,6 +95,21 @@ class MemoryManager:
                     runtime_slot_memory.get("leave_create", {}).get("leave_type")
                     or persisted_slot_memory.get("leave_create", {}).get("leave_type")
                     or "sick"
+                ),
+            },
+            "course_plan_generate": {
+                "semester": (
+                    runtime_slot_memory.get("course_plan_generate", {}).get("semester")
+                    or persisted_slot_memory.get("course_plan_generate", {}).get("semester")
+                ),
+                "last_generated_plans": (
+                    runtime_slot_memory.get("course_plan_generate", {}).get("last_generated_plans")
+                    or persisted_slot_memory.get("course_plan_generate", {}).get("last_generated_plans")
+                    or []
+                ),
+                "selected_plan_index": (
+                    runtime_slot_memory.get("course_plan_generate", {}).get("selected_plan_index")
+                    or persisted_slot_memory.get("course_plan_generate", {}).get("selected_plan_index")
                 ),
             },
         }
@@ -143,6 +164,11 @@ class MemoryManager:
                 "reason": None,
                 "leave_type": "sick",
             },
+            "course_plan_generate": {
+                "semester": None,
+                "last_generated_plans": [],
+                "selected_plan_index": None,
+            },
         }
 
         for item in messages:
@@ -164,6 +190,10 @@ class MemoryManager:
             amount = self._extract_amount(content)
             if amount is not None:
                 slot_memory["campus_card_topup"]["amount"] = amount
+            
+            plan_index = self._extract_plan_index(content)
+            if plan_index is not None:
+                slot_memory["course_plan_generate"]["selected_plan_index"] = plan_index
 
             days = self._extract_leave_days(content)
             if days is not None:

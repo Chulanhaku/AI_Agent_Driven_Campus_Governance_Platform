@@ -27,6 +27,7 @@ class ContextBuilder:
                 "leave_create",
                 "policy_qa",
                 "fallback",
+                "course_plan_generate",
             ],
             "memory": memory_context or {
                 "recent_messages": [],

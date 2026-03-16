@@ -22,6 +22,8 @@ class AgentRouter:
                     "leave_create",
                     "policy_qa",
                     "fallback",
+                    "course_plan_generate",
+                    "course_plan_submit",
                 }:
                     return intent
             except Exception:
@@ -84,6 +86,30 @@ class AgentRouter:
             "明天课表",
         ]
 
+        course_plan_keywords = [
+            "选课方案",
+            "帮我选课",
+            "安排选课",
+            "生成选课方案",
+            "本学期选课",
+            "最优选课",
+            "课程安排方案",
+            "选课",
+        ]
+        course_plan_submit_keywords = [
+            "选方案",
+            "提交方案",
+            "就这个方案",
+            "提交选课方案",
+            "把方案提交",
+        ]
+        for keyword in course_plan_submit_keywords:
+            if keyword in normalized:
+                return "course_plan_submit"
+        for keyword in course_plan_keywords:
+            if keyword in normalized:
+                return "course_plan_generate"
+
         if "请假" in normalized and any(keyword in normalized for keyword in policy_keywords):
             return "policy_qa"
 
@@ -101,6 +127,9 @@ class AgentRouter:
             if keyword in normalized:
                 return "campus_card_topup"
 
+        for keyword in course_plan_submit_keywords:
+            if keyword in normalized:
+                return "course_plan_submit"
 
         for keyword in schedule_keywords:
             if keyword in normalized:

@@ -70,3 +70,21 @@ class User(Base, TimestampMixin):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+    
+    student_course_plans = relationship(
+        "StudentCoursePlan",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+    completed_courses = relationship(
+        "StudentCompletedCourse",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+    course_enrollment_requests = relationship(
+        "CourseEnrollmentRequest",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )

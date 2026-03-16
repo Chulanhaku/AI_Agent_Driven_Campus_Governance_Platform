@@ -26,6 +26,10 @@ from app.db.repositories.agent_session_memory_repository import AgentSessionMemo
 from app.services.agent_memory_service import AgentMemoryService
 from app.agent.session_manager import SessionSummaryManager
 from app.agent.response_composer import ResponseComposer
+from app.services.course_plan_service import CoursePlanService
+from app.tools.course_plan_tools import GenerateCoursePlanTool, SubmitCoursePlanTool
+from app.services.course_enrollment_service import CourseEnrollmentService
+from app.workflows.course_plan_workflow import CoursePlanWorkflow
 
 class AgentSessionService:
     def __init__(
@@ -41,6 +45,8 @@ class AgentSessionService:
         llm_provider: BaseLlmProvider,
         retriever: Retriever,
         rag_top_k: int,
+        course_plan_service: CoursePlanService,
+        course_enrollment_service: CourseEnrollmentService,
     ) -> None:
         self.agent_session_repository = agent_session_repository
         self.pending_action_repository = pending_action_repository
@@ -65,6 +71,9 @@ class AgentSessionService:
         self.memory_manager = MemoryManager(agent_session_repository)
         self.session_summary_manager = SessionSummaryManager(llm_provider)
         self.response_composer = ResponseComposer(llm_provider)
+
+        self.course_plan_service = course_plan_service
+        self.course_enrollment_service = course_enrollment_service
 
     def get_user_session(self, session_id: int, user_id: int) -> AgentSession | None:
         return self.agent_session_repository.get_session_by_id_and_user_id(
@@ -259,6 +268,60 @@ class AgentSessionService:
                     },
                 )
 
+            elif action.action_type == "course_plan_submit":
+                semester = str(action.payload_json["semester"])
+                selected_plan = dict(action.payload_json["selected_plan"])
+
+                tool = SubmitCoursePlanTool(self.course_enrollment_service)
+
+                tool_log = self.tool_execution_log_service.start_log(
+                    session_id=session.id,
+                    tool_name=tool.name,
+                    input_json={
+                        "user_id": current_user.id,
+                        "semester": semester,
+                        "selected_plan": selected_plan,
+                    },
+                )
+
+                try:
+                    result = tool.run(
+                        user_id=current_user.id,
+                        semester=semester,
+                        selected_plan=selected_plan,
+                    )
+                    self.tool_execution_log_service.finish_log(
+                        log=tool_log,
+                        output_json=result,
+                        status="success",
+                    )
+                except Exception as exc:
+                    self.tool_execution_log_service.finish_log(
+                        log=tool_log,
+                        output_json={"error": str(exc)},
+                        status="failed",
+                    )
+                    raise
+
+                self.pending_action_repository.update_status(action=action, status="approved")
+
+                assistant_text = self.response_formatter.format(
+                    intent="course_plan_submit",
+                    result=result,
+                )
+
+                self.audit_service.record(
+                    user_id=current_user.id,
+                    action="course_plan.submit",
+                    target_type="pending_action",
+                    target_id=action.id,
+                    detail_json={
+                        "semester": semester,
+                        "session_id": session.id,
+                        "result": result,
+                    },
+                )
+
             elif action.action_type == "leave_create":
                 days = int(action.payload_json["days"])
                 reason = str(action.payload_json["reason"])
@@ -342,10 +405,12 @@ class AgentSessionService:
         schedule_tool = QueryMyScheduleTool(self.schedule_service)
         balance_tool = QueryCampusCardBalanceTool(self.campus_card_service)
         rag_tool = QueryPolicyKnowledgeTool(self.retriever, top_k=self.rag_top_k)
+        course_plan_tool = GenerateCoursePlanTool(self.course_plan_service)
 
         tool_registry.register(schedule_tool)
         tool_registry.register(balance_tool)
         tool_registry.register(rag_tool)
+        tool_registry.register(course_plan_tool)
 
         intent = self.router.detect_intent(user_message)
         secondary_intents = self.router.detect_secondary_intents(user_message)
@@ -371,6 +436,8 @@ class AgentSessionService:
             persisted_memory=persisted_memory,
         )
         slot_memory = memory_context.get("slot_memory", {})
+
+
 
         if intent == "fallback":
             pending_intent = slot_memory.get("pending_intent")
@@ -432,6 +499,14 @@ class AgentSessionService:
         context["amount"] = amount
         context["leave_days"] = leave_days
         context["leave_reason"] = leave_reason
+        context["semester"] = "2026-Spring"   # for course planning, hardcoded for now, can be extracted from message or user profile in the future
+
+        selected_plan_index = (
+            memory_context.get("slot_memory", {})
+            .get("course_plan_generate", {})
+            .get("selected_plan_index")
+        )
+        context["selected_plan_index"] = selected_plan_index
 
         use_llm_planner = self.prompt_manager.should_use_llm_planner(
             primary_intent=intent,
@@ -536,6 +611,56 @@ class AgentSessionService:
             )
             return response_text, True, pending_action.id
 
+        if first_step_type == "create_pending_course_plan_submit":
+            slot_memory = memory_context.get("slot_memory", {})
+            course_plan_memory = slot_memory.get("course_plan_generate", {})
+            last_generated_plans = course_plan_memory.get("last_generated_plans", [])
+            selected_plan_index = context.get("selected_plan_index")
+
+            if not selected_plan_index:
+                return "我识别到你想提交选课方案，但没有解析到方案编号。比如你可以说：选方案2。", False, None
+
+            if not last_generated_plans:
+                return "当前会话中还没有可提交的候选选课方案，请先让我为你生成选课方案。", False, None
+
+            if selected_plan_index < 1 or selected_plan_index > len(last_generated_plans):
+                return f"方案编号超出范围。当前共有 {len(last_generated_plans)} 套候选方案。", False, None
+
+            selected_plan = last_generated_plans[selected_plan_index - 1]
+            semester = course_plan_memory.get("semester") or "2026-spring"
+
+            workflow = CoursePlanWorkflow(self.pending_action_repository)
+            pending_action = workflow.create_pending_submit(
+                current_user=current_user,
+                session_id=session_id,
+                semester=semester,
+                selected_plan=selected_plan,
+                selected_plan_index=selected_plan_index,
+            )
+
+            self.audit_service.record(
+                user_id=current_user.id,
+                action="pending_action.create",
+                target_type="pending_action",
+                target_id=pending_action.id,
+                detail_json={
+                    "action_type": "course_plan_submit",
+                    "semester": semester,
+                    "selected_plan_index": selected_plan_index,
+                    "session_id": session_id,
+                },
+            )
+
+            response_text = self.response_formatter.format(
+                intent="course_plan_submit",
+                result={
+                    "requires_confirmation": True,
+                    "selected_plan_index": selected_plan_index,
+                    "action_id": pending_action.id,
+                },
+            )
+            return response_text, True, pending_action.id
+
         execution_result = self._execute_multistep_plan(
             session_id=session_id,
             plan=plan,
@@ -611,6 +736,52 @@ class AgentSessionService:
                 },
             )
 
+            return final_reply, False, None
+        
+        if intent == "course_plan_generate":
+            self.audit_service.record(
+                user_id=current_user.id,
+                action="course_plan.generate",
+                target_type="agent_session",
+                target_id=session_id,
+                detail_json={
+                    "message": user_message,
+                },
+            )
+
+            tool_result_summary = self._build_tool_result_summary(
+                primary_intent=intent,
+                execution_result=execution_result,
+            )
+
+            final_reply = self.response_composer.compose(
+                user_name=current_user.full_name,
+                user_message=user_message,
+                primary_intent=intent,
+                secondary_intents=secondary_intents,
+                tool_result_summary=tool_result_summary,
+                reasoning_result_summary=None,
+                memory_summary=memory_context.get("summary_text"),
+            )
+
+
+            updated_slot_snapshot = memory_context.get("slot_memory", {}).copy()
+            updated_slot_snapshot["course_plan_generate"] = {
+                "semester": execution_result.get("tool_results", {})
+                    .get("generate_course_plan", {})
+                    .get("semester"),
+                "last_generated_plans": execution_result.get("tool_results", {})
+                    .get("generate_course_plan", {})
+                    .get("plans", []),
+                "selected_plan_index": None,
+            }
+
+            self.agent_memory_service.save_memory_snapshot(
+                session_id=session_id,
+                summary_text=memory_context.get("summary_text"),
+                current_intent="course_plan_generate",
+                slot_snapshot_json=updated_slot_snapshot,
+            )
             return final_reply, False, None
 
         return self.response_formatter.format(intent=intent, result=execution_result), False, None
@@ -898,6 +1069,13 @@ class AgentSessionService:
             return self.response_formatter.format(
                 intent="policy_qa",
                 result=policy_result,
+            )
+
+        if primary_intent == "course_plan_generate":
+            course_plan_result = tool_results.get("generate_course_plan", {})
+            return self.response_formatter.format(
+                intent="course_plan_generate",
+                result=course_plan_result,
             )
 
         return "已完成相关工具调用。"

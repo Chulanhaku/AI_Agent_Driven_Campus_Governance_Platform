@@ -1,18 +1,27 @@
-from .role import Role
-from .permission import Permission, RolePermission
-from .user import User
-from .profile import StudentProfile, TeacherProfile
-from .schedule import Course, ScheduleEntry, ExamSchedule
-from .leave_request import LeaveRequest
-from .approval_record import ApprovalRecord
-from .campus_card import CampusCardAccount, CampusCardTransaction
-from .notification import Notification
-from .agent_session import AgentSession
-from .agent_message import AgentMessage
-from .pending_action import PendingAction
-from .tool_execution_log import ToolExecutionLog
-from .audit_log import AuditLog
-from .agent_session_memory import AgentSessionMemory
+from app.db.models.role import Role
+from app.db.models.permission import Permission, RolePermission
+from app.db.models.user import User
+from app.db.models.profile import StudentProfile, TeacherProfile
+from app.db.models.schedule import (
+    Course,
+    ScheduleEntry,
+    ExamSchedule,
+    CourseSection,
+    StudentCoursePlan,
+    StudentCompletedCourse,
+    CoursePrerequisite,
+    CourseEnrollmentRequest,
+    CourseEnrollmentRequestItem,
+)
+from app.db.models.agent_session import AgentSession
+from app.db.models.agent_message import AgentMessage
+from app.db.models.agent_session_memory import AgentSessionMemory
+from app.db.models.campus_card import CampusCardAccount, CampusCardTransaction
+from app.db.models.pending_action import PendingAction
+from app.db.models.leave_request import LeaveRequest
+from app.db.models.approval_record import ApprovalRecord
+from app.db.models.audit_log import AuditLog
+from app.db.models.tool_execution_log import ToolExecutionLog
 
 __all__ = [
     "Role",
@@ -24,8 +33,15 @@ __all__ = [
     "Course",
     "ScheduleEntry",
     "ExamSchedule",
+    "CourseSection",
+    "StudentCoursePlan",
+    "StudentCompletedCourse",
+    "CoursePrerequisite",
+    "CourseEnrollmentRequest",
+    "CourseEnrollmentRequestItem",
     "AgentSession",
     "AgentMessage",
+    "AgentSessionMemory",
     "CampusCardAccount",
     "CampusCardTransaction",
     "PendingAction",
@@ -33,5 +49,4 @@ __all__ = [
     "ApprovalRecord",
     "AuditLog",
     "ToolExecutionLog",
-    "AgentSessionMemory",
 ]

@@ -133,6 +133,40 @@ class Planner:
                 ],
             }
 
+        if intent == "course_plan_generate":
+            return {
+                "plan_type": "multi_step",
+                "steps": [
+                    {
+                        "type": "call_tool",
+                        "tool_name": "generate_course_plan",
+                        "params": {
+                            "user_id": context["current_user"]["id"],
+                            "semester": context.get("semester") or "2026-spring",
+                            "max_plan_count": 3,
+                        },
+                    },
+                    {
+                        "type": "compose",
+                    },
+                ],
+            }
+        
+        if intent == "course_plan_submit":
+            return {
+                "plan_type": "workflow",
+                "steps": [
+                    {
+                        "type": "create_pending_course_plan_submit",
+                        "params": {
+                            "user_id": context["current_user"]["id"],
+                            "session_id": context["session_id"],
+                            "selected_plan_index": context.get("selected_plan_index"),
+                        },
+                    }
+                ],
+            }
+
         return {
             "plan_type": "fallback",
             "steps": [

@@ -28,6 +28,13 @@ from app.services.schedule_service import ScheduleService
 from app.services.tool_execution_log_service import ToolExecutionLogService
 from app.db.repositories.agent_session_memory_repository import AgentSessionMemoryRepository
 from app.services.agent_memory_service import AgentMemoryService
+from app.db.repositories.course_section_repository import CourseSectionRepository
+from app.db.repositories.student_course_plan_repository import StudentCoursePlanRepository
+from app.db.repositories.completed_course_repository import CompletedCourseRepository
+from app.db.repositories.course_prerequisite_repository import CoursePrerequisiteRepository
+from app.services.course_plan_service import CoursePlanService
+from app.db.repositories.course_enrollment_repository import CourseEnrollmentRepository
+from app.services.course_enrollment_service import CourseEnrollmentService
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -46,6 +53,12 @@ def get_agent_session_service(
     leave_repository = LeaveRepository(db)
     audit_log_repository = AuditLogRepository(db)
     tool_execution_log_repository = ToolExecutionLogRepository(db)
+    course_section_repository = CourseSectionRepository(db)
+    student_course_plan_repository = StudentCoursePlanRepository(db)
+    completed_course_repository = CompletedCourseRepository(db)
+    course_prerequisite_repository = CoursePrerequisiteRepository(db)
+    course_enrollment_repository = CourseEnrollmentRepository(db)
+
 
     schedule_service = ScheduleService(schedule_repository)
     campus_card_service = CampusCardService(campus_card_repository)
@@ -54,6 +67,15 @@ def get_agent_session_service(
     tool_execution_log_service = ToolExecutionLogService(tool_execution_log_repository)
     memory_repository = AgentSessionMemoryRepository(db)
     agent_memory_service = AgentMemoryService(memory_repository)
+    course_plan_service = CoursePlanService(
+        course_section_repository=course_section_repository,
+        student_course_plan_repository=student_course_plan_repository,
+        completed_course_repository=completed_course_repository,
+        course_prerequisite_repository=course_prerequisite_repository,
+    )
+    course_enrollment_service = CourseEnrollmentService(
+        course_enrollment_repository=course_enrollment_repository,
+    )
 
     return AgentSessionService(
         agent_session_repository=agent_session_repository,
@@ -67,6 +89,8 @@ def get_agent_session_service(
         llm_provider=llm_provider,
         retriever=retriever,
         rag_top_k=settings.rag_top_k,
+        course_plan_service=course_plan_service,
+        course_enrollment_service=course_enrollment_service,
     )
 
 def get_tool_execution_log_service(
