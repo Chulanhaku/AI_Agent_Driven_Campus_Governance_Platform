@@ -47,7 +47,7 @@ class Planner:
         context: dict,
     ) -> dict:
         secondary_intents = context.get("secondary_intents", [])
-
+        print(intent, secondary_intents)
         if intent == "query_schedule":
             steps = [
                 {
@@ -204,9 +204,25 @@ class Planner:
                     params["user_id"] = context["current_user"]["id"]
                 step["params"] = params
 
+                if tool_name in {"generate_course_plan", "query_my_schedule"}:
+                    semester = (
+                        params.get("semester")
+                        or context.get("semester")
+                        or "2026-spring"
+                    )
+                    params["semester"] = self._normalize_semester(semester)
+                if tool_name == "generate_course_plan":
+                    if "max_plan_count" not in params:
+                        params["max_plan_count"] = 3
+
             elif step_type == "reason":
                 goal = step.get("goal")
                 if goal not in allowed_goals:
                     raise ValueError(f"Reasoning goal not allowed: {goal}")
 
         return plan
+    
+    def _normalize_semester(self, value: str | None) -> str | None:
+        if not value:
+            return None
+        return value.strip().lower().replace("_", "-")

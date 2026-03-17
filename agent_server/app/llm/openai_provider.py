@@ -22,7 +22,12 @@ class OpenAiProvider(BaseLlmProvider):
         self.model = settings.openai_model
         self.output_parser = OutputParser()
 
-    def classify_intent(self, *, message: str) -> dict:
+    def classify_intent(
+        self,
+        *,
+        message: str,
+        recent_messages_text: str | None = None,
+    ) -> dict:
         prompt = f"""
 你是一个校务 Agent 的意图分类器。
 请只输出 JSON，不要输出任何额外文字。
@@ -32,15 +37,27 @@ class OpenAiProvider(BaseLlmProvider):
 - campus_card_topup
 - leave_create
 - policy_qa
+- course_plan_generate
+- course_plan_submit
 - fallback
 
-用户消息:
+分类规则：
+1. 用户请求生成、推荐、安排选课方案时，返回 course_plan_generate
+2. 用户在已有方案中做选择、确认、提交时，返回 course_plan_submit
+3. 像“第一套”“第二套”“方案1”“方案一”“我选第一套”“就这个方案”这类，
+如果结合最近对话可知是在确认已生成的选课方案，优先返回 course_plan_submit
+4. 无法确定时返回 fallback
+
+最近对话：
+{recent_messages_text or "无"}
+
+用户消息：
 {message}
 
 输出格式:
 {{
-  "intent": "query_schedule|campus_card_topup|leave_create|policy_qa|fallback",
-  "confidence": 0.0
+"intent": "query_schedule|campus_card_topup|leave_create|policy_qa|fallback|course_plan_generate|course_plan_submit",
+"confidence": 0.0
 }}
 """.strip()
 
@@ -63,6 +80,12 @@ class OpenAiProvider(BaseLlmProvider):
 - reason: 字符串，无法提取则为 null
 - leave_type: 固定返回 "sick"
 
+如果 intent == course_plan_generate，请提取:
+- semester: 字符串，格式统一为 "2026-spring"，无法提取则为 null
+
+如果 intent == course_plan_submit，请提取:
+- selected_plan_index: 整数，例如“方案1”“第一套”提取为 1，无法提取则为 null
+
 如果 intent == query_schedule 或 policy_qa，可返回空对象。
 
 用户消息:
@@ -73,7 +96,9 @@ class OpenAiProvider(BaseLlmProvider):
   "amount": "50",
   "days": 2,
   "reason": "发烧",
-  "leave_type": "sick"
+  "leave_type": "sick",
+  "semester": "2026-spring",
+  "selected_plan_index": 1
 }}
 """.strip()
 

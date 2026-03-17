@@ -3,7 +3,12 @@ from abc import ABC, abstractmethod
 
 class BaseLlmProvider(ABC):
     @abstractmethod
-    def classify_intent(self, *, message: str) -> dict:
+    def classify_intent(
+        self,
+        *,
+        message: str,
+        recent_messages_text: str | None = None,
+    ) -> dict:
         raise NotImplementedError
 
     @abstractmethod

@@ -7,14 +7,50 @@ class AgentRouter:
     def __init__(self, llm_provider: BaseLlmProvider | None = None) -> None:
         self.llm_provider = llm_provider
 
-    def detect_intent(self, message: str) -> str:
-        rule_intent = self._detect_intent_by_rules(message)
+    # def detect_intent(self, message: str) -> str:
+    #     rule_intent = self._detect_intent_by_rules(message)
+    #     if rule_intent != "fallback":
+    #         return rule_intent
+
+    #     if self.llm_provider is not None:
+    #         try:
+    #             result = self.llm_provider.classify_intent(message=message)
+    #             intent = result.get("intent", "fallback")
+    #             if intent in {
+    #                 "query_schedule",
+    #                 "campus_card_topup",
+    #                 "leave_create",
+    #                 "policy_qa",
+    #                 "fallback",
+    #                 "course_plan_generate",
+    #                 "course_plan_submit",
+    #             }:
+    #                 return intent
+    #         except Exception:
+    #             pass
+
+    #     return "fallback"
+
+    def detect_intent(
+        self,
+        *,
+        message: str,
+        memory_context: dict | None = None,
+    ) -> str:
+        rule_intent = self._detect_intent_by_rules(
+            message=message,
+            memory_context=memory_context,
+        )
         if rule_intent != "fallback":
             return rule_intent
 
         if self.llm_provider is not None:
             try:
-                result = self.llm_provider.classify_intent(message=message)
+                recent_messages_text = self._build_recent_messages_text(memory_context)
+                result = self.llm_provider.classify_intent(
+                    message=message,
+                    recent_messages_text=recent_messages_text,
+                )
                 intent = result.get("intent", "fallback")
                 if intent in {
                     "query_schedule",
@@ -31,7 +67,12 @@ class AgentRouter:
 
         return "fallback"
 
-    def _detect_intent_by_rules(self, message: str) -> str:
+    def _detect_intent_by_rules(
+        self,
+        *,
+        message: str,
+        memory_context: dict | None = None,
+    ) -> str:
         normalized = message.strip().lower()
 
         policy_keywords = [
@@ -240,3 +281,65 @@ class AgentRouter:
                 results.append("time_planning_advice")
 
         return results
+    
+    def _build_recent_messages_text(
+        self,
+        memory_context: dict | None,
+    ) -> str:
+        if not memory_context:
+            return ""
+
+        recent_messages = memory_context.get("recent_messages", [])
+        summary_text = memory_context.get("summary_text", "")
+
+        lines: list[str] = []
+
+        if summary_text:
+            lines.append(f"会话摘要：{summary_text}")
+
+        if recent_messages:
+            lines.append("最近对话：")
+            for item in recent_messages[-6:]:
+                role = item.get("role", "unknown")
+                content = (item.get("content") or "").strip()
+                if content:
+                    lines.append(f"{role}: {content}")
+
+        return "\n".join(lines)
+    
+    def extract_selected_plan_index(self, message: str) -> int | None:
+        normalized = message.strip().lower()
+
+        patterns = [
+            r"方案\s*([1-9]\d*)",
+            r"第\s*([1-9]\d*)\s*套",
+            r"第\s*([1-9]\d*)\s*个",
+            r"我选\s*([1-9]\d*)",
+            r"选\s*([1-9]\d*)",
+        ]
+
+        for pattern in patterns:
+            match = re.search(pattern, normalized)
+            if match:
+                return int(match.group(1))
+
+        chinese_mapping = {
+            "方案一": 1,
+            "方案二": 2,
+            "方案三": 3,
+            "第一套": 1,
+            "第二套": 2,
+            "第三套": 3,
+            "第一个": 1,
+            "第二个": 2,
+            "第三个": 3,
+            "我选第一套": 1,
+            "我选第二套": 2,
+            "我选第三套": 3,
+        }
+
+        for text, index in chinese_mapping.items():
+            if text in message:
+                return index
+
+        return None

@@ -170,7 +170,7 @@ class CoursePlanService:
             active_plan=active_plan,
             max_plan_count=max_plan_count,
         )
-
+        print("test2")
         return {
             "success": True,
             "semester": semester,

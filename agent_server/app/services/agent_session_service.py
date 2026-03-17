@@ -150,14 +150,25 @@ class AgentSessionService:
                 recent_messages=recent_memory_context.get("recent_messages", []),
             )
 
+            # self.agent_memory_service.save_memory_snapshot(
+            #     session_id=session.id,
+            #     summary_text=generated_summary,
+            #     current_intent=recent_memory_context.get("current_intent"),
+            #     slot_snapshot_json=recent_memory_context.get("slot_memory"),
+            # )
+            latest_memory = self.agent_memory_service.get_session_memory(session.id)
+            latest_slot_snapshot = latest_memory.slot_snapshot_json if latest_memory else {}
+
+            # merged_slot_snapshot = dict(latest_slot_snapshot or {})
+            # merged_slot_snapshot.update(recent_memory_context.get("slot_memory", {}) or {})
+
             self.agent_memory_service.save_memory_snapshot(
                 session_id=session.id,
                 summary_text=generated_summary,
                 current_intent=recent_memory_context.get("current_intent"),
-                slot_snapshot_json=recent_memory_context.get("slot_memory"),
+                slot_snapshot_json=latest_slot_snapshot,
             )
-
-
+#
             self.agent_session_repository.commit()
             return session, user_message, assistant_message, requires_confirmation, action_id
         except Exception:
@@ -412,14 +423,6 @@ class AgentSessionService:
         tool_registry.register(rag_tool)
         tool_registry.register(course_plan_tool)
 
-        intent = self.router.detect_intent(user_message)
-        secondary_intents = self.router.detect_secondary_intents(user_message)
-
-        amount = self.router.extract_amount(user_message)
-        leave_days = self.router.extract_leave_days(user_message)
-        leave_reason = self.router.extract_leave_reason(user_message)
-
-
         persisted_memory_obj = self.agent_memory_service.get_session_memory(session_id)
         persisted_memory = None
 
@@ -436,6 +439,17 @@ class AgentSessionService:
             persisted_memory=persisted_memory,
         )
         slot_memory = memory_context.get("slot_memory", {})
+
+        intent = self.router.detect_intent(
+            message=user_message,
+            memory_context=memory_context,
+        )
+        secondary_intents = self.router.detect_secondary_intents(user_message)
+
+        amount = self.router.extract_amount(user_message)
+        leave_days = self.router.extract_leave_days(user_message)
+        leave_reason = self.router.extract_leave_reason(user_message)
+        selected_plan_index = self.router.extract_selected_plan_index(user_message)
 
 
 
@@ -470,8 +484,11 @@ class AgentSessionService:
         if (
             (intent == "campus_card_topup" and not amount)
             or (intent == "leave_create" and (not leave_days or not leave_reason))
+            or (intent == "course_plan_submit" and not selected_plan_index)
         ):
             llm_slots = self.router.extract_slots_with_llm(intent=intent, message=user_message)
+        if intent == "course_plan_submit" and not selected_plan_index:
+            selected_plan_index = llm_slots.get("selected_plan_index")
         print("LLM extracted slots:", llm_slots)
         if intent == "campus_card_topup" and not amount:
             amount = llm_slots.get("amount")
@@ -499,13 +516,15 @@ class AgentSessionService:
         context["amount"] = amount
         context["leave_days"] = leave_days
         context["leave_reason"] = leave_reason
-        context["semester"] = "2026-Spring"   # for course planning, hardcoded for now, can be extracted from message or user profile in the future
+        context["semester"] = "2026-spring"   # for course planning, hardcoded for now, can be extracted from message or user profile in the future
 
-        selected_plan_index = (
-            memory_context.get("slot_memory", {})
-            .get("course_plan_generate", {})
-            .get("selected_plan_index")
-        )
+        if selected_plan_index is None:
+            selected_plan_index = (
+                memory_context.get("slot_memory", {})
+                .get("course_plan_generate", {})
+                .get("selected_plan_index")
+            )
+
         context["selected_plan_index"] = selected_plan_index
 
         use_llm_planner = self.prompt_manager.should_use_llm_planner(
@@ -514,7 +533,7 @@ class AgentSessionService:
             user_message=user_message,
         )
 
-
+        print("service line 517",intent, secondary_intents, use_llm_planner)
         plan = self.planner.build_plan(
             intent=intent,
             context=context,
@@ -660,7 +679,7 @@ class AgentSessionService:
                 },
             )
             return response_text, True, pending_action.id
-
+        print("Generated plan:", plan)
         execution_result = self._execute_multistep_plan(
             session_id=session_id,
             plan=plan,

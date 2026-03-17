@@ -28,6 +28,7 @@ class ContextBuilder:
                 "policy_qa",
                 "fallback",
                 "course_plan_generate",
+                "course_plan_submit",
             ],
             "memory": memory_context or {
                 "recent_messages": [],

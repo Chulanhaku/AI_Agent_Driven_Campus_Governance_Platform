@@ -18,6 +18,8 @@ class GenerateCoursePlanTool(BaseTool):
         max_plan_count: int = 3,
         **kwargs,
     ) -> dict:
+        print(semester)
+        semester = semester.replace("_", "-")
         return self.course_plan_service.generate_candidate_plans(
             user_id=user_id,
             semester=semester,

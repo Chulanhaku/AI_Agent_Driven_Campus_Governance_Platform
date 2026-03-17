@@ -58,7 +58,7 @@ class ResponseFormatter:
         if intent == "course_plan_generate" and result.get("success"):
             plans = result.get("plans", [])
             if not plans:
-                return "当前没有生成可行的选课方案。"
+                return "当前没有生成可行的选课方案。,test1"
 
             lines = [f"共生成 {len(plans)} 套候选选课方案："]
             for idx, plan in enumerate(plans, start=1):
