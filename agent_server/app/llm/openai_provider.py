@@ -46,7 +46,8 @@ class OpenAiProvider(BaseLlmProvider):
 2. 用户在已有方案中做选择、确认、提交时，返回 course_plan_submit
 3. 像“第一套”“第二套”“方案1”“方案一”“我选第一套”“就这个方案”这类，
 如果结合最近对话可知是在确认已生成的选课方案，优先返回 course_plan_submit
-4. 无法确定时返回 fallback
+4. 用户询问制度、规则、流程、条件，或提到“学生手册”“第X章”“第X条”时，返回 policy_qa
+5. 无法确定时返回 fallback
 
 最近对话：
 {recent_messages_text or "无"}

@@ -76,6 +76,8 @@ class AgentRouter:
         normalized = message.strip().lower()
 
         policy_keywords = [
+            "学生手册",
+            "手册",
             "规定",
             "制度",
             "规则",
@@ -154,6 +156,8 @@ class AgentRouter:
         if "请假" in normalized and any(keyword in normalized for keyword in policy_keywords):
             return "policy_qa"
 
+        if re.search(r"第[一二三四五六七八九十百千零两0-9]+(章|条)", message):
+            return "policy_qa"
 
         if any(keyword in normalized for keyword in policy_keywords):
             return "policy_qa"

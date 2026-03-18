@@ -17,6 +17,7 @@ class OpenAiEmbeddingsProvider(BaseEmbeddingsProvider):
         self.client = OpenAI(**client_kwargs)
         self.model = settings.embedding_model
         self.dimensions = settings.embedding_dimensions
+        self.batch_size = 10
 
     def embed_text(self, text: str) -> list[float]:
         kwargs = {
@@ -32,14 +33,22 @@ class OpenAiEmbeddingsProvider(BaseEmbeddingsProvider):
         return response.data[0].embedding
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        kwargs = {
-            "model": self.model,
-            "input": texts,
-            "encoding_format": "float",
-        }
+        if not texts:
+            return []
+
+        embeddings: list[list[float]] = []
+        for start in range(0, len(texts), self.batch_size):
+            batch = texts[start : start + self.batch_size]
+            kwargs = {
+                "model": self.model,
+                "input": batch,
+                "encoding_format": "float",
+            }
 
         if self.dimensions:
             kwargs["dimensions"] = self.dimensions
 
-        response = self.client.embeddings.create(**kwargs)
-        return [item.embedding for item in response.data]
+            response = self.client.embeddings.create(**kwargs)
+            embeddings.extend([item.embedding for item in response.data])
+
+        return embeddings
