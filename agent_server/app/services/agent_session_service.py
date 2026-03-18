@@ -31,6 +31,9 @@ from app.services.course_plan_service import CoursePlanService
 from app.tools.course_plan_tools import GenerateCoursePlanTool, SubmitCoursePlanTool
 from app.services.course_enrollment_service import CourseEnrollmentService
 from app.workflows.course_plan_workflow import CoursePlanWorkflow
+from app.services.notification_service import NotificationService
+from app.tools.notification_tools import ExecuteSendNotificationTool
+
 
 logger = logging.getLogger(__name__)
 
@@ -69,12 +72,11 @@ class AgentSessionService:
         self.executor = Executor()
         self.response_formatter = ResponseFormatter()
         self.prompt_manager = PromptManager()
-        self.memory_manager = MemoryManager(agent_session_repository)
-        #added
         self.agent_memory_service = agent_memory_service
         self.memory_manager = MemoryManager(agent_session_repository)
         self.session_summary_manager = SessionSummaryManager(llm_provider)
         self.response_composer = ResponseComposer(llm_provider)
+        self.notification_service = NotificationService()
 
         self.course_plan_service = course_plan_service
         self.course_enrollment_service = course_enrollment_service
@@ -421,11 +423,13 @@ class AgentSessionService:
         balance_tool = QueryCampusCardBalanceTool(self.campus_card_service)
         rag_tool = QueryPolicyKnowledgeTool(self.retriever, top_k=self.rag_top_k)
         course_plan_tool = GenerateCoursePlanTool(self.course_plan_service)
+        notification_tool = ExecuteSendNotificationTool(self.notification_service)
 
         tool_registry.register(schedule_tool)
         tool_registry.register(balance_tool)
         tool_registry.register(rag_tool)
         tool_registry.register(course_plan_tool)
+        tool_registry.register(notification_tool)
 
         persisted_memory_obj = self.agent_memory_service.get_session_memory(session_id)
         persisted_memory = None

@@ -57,6 +57,7 @@ class AgentRouter:
                     "campus_card_topup",
                     "leave_create",
                     "policy_qa",
+                    "send_notification",
                     "fallback",
                     "course_plan_generate",
                     "course_plan_submit",
@@ -128,6 +129,13 @@ class AgentRouter:
             "今天课表",
             "明天课表",
         ]
+        notification_keywords = [
+            "通知",
+            "发通知",
+            "联系",
+            "提醒",
+            "告知",
+        ]
 
         course_plan_keywords = [
             "选课方案",
@@ -179,6 +187,9 @@ class AgentRouter:
         for keyword in schedule_keywords:
             if keyword in normalized:
                 return "query_schedule"
+        for keyword in notification_keywords:
+            if keyword in normalized:
+                return "send_notification"
 
         return "fallback"
 

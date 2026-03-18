@@ -175,6 +175,7 @@ class Planner:
                 }
             ],
         }
+    
 
     def _validate_and_normalize_plan(
         self,
