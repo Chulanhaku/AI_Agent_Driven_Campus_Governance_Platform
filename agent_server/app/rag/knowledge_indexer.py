@@ -19,6 +19,11 @@ class KnowledgeIndexer:
 
         chunk_items = []
         for doc in docs:
+            prebuilt_chunks = doc.get("prebuilt_chunks") or []
+            if prebuilt_chunks:
+                chunk_items.extend(prebuilt_chunks)
+                continue
+
             chunks = self.chunker.split_text(doc["content"])
             for idx, chunk in enumerate(chunks):
                 chunk_items.append(

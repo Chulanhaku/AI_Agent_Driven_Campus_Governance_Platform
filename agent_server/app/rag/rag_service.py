@@ -1,9 +1,12 @@
+from typing import cast
+
 from app.config.settings import get_settings
 from app.llm.base import BaseLlmProvider
 from app.llm.embeddings_provider import BaseEmbeddingsProvider
 from app.rag.chunker import TextChunker
 from app.rag.document_loader import DocumentLoader
 from app.rag.knowledge_indexer import KnowledgeIndexer
+from app.rag.policy_handbook_hybrid_retriever import PolicyHandbookHybridRetriever
 from app.rag.retriever import Retriever
 from app.rag.vector_store import InMemoryVectorStore
 
@@ -31,7 +34,20 @@ class RagService:
             vector_store=vector_store,
         )
         indexer.build_index(self.settings.knowledge_dir)
-        self.retriever = Retriever(vector_store)
+        base_retriever = Retriever(vector_store)
+
+        if self.settings.policy_handbook_enabled:
+            self.retriever = cast(
+                Retriever,
+                PolicyHandbookHybridRetriever(
+                    vector_retriever=base_retriever,
+                    sql_top_k=self.settings.policy_handbook_sql_top_k,
+                    vector_top_k=self.settings.policy_handbook_vector_top_k,
+                ),
+            )
+            return
+
+        self.retriever = base_retriever
 
     def rebuild_index(self) -> None:
         self.build_index()
@@ -39,4 +55,6 @@ class RagService:
     def get_retriever(self) -> Retriever:
         if self.retriever is None:
             self.build_index()
+        if self.retriever is None:
+            raise RuntimeError("retriever initialization failed")
         return self.retriever

@@ -1,3 +1,4 @@
+import logging
 from app.agent.context_builder import ContextBuilder
 from app.agent.executor import Executor
 from app.agent.planner import Planner
@@ -30,6 +31,9 @@ from app.services.course_plan_service import CoursePlanService
 from app.tools.course_plan_tools import GenerateCoursePlanTool, SubmitCoursePlanTool
 from app.services.course_enrollment_service import CourseEnrollmentService
 from app.workflows.course_plan_workflow import CoursePlanWorkflow
+
+logger = logging.getLogger(__name__)
+
 
 class AgentSessionService:
     def __init__(
@@ -755,6 +759,12 @@ class AgentSessionService:
                 },
             )
 
+            retrieval_appendix = self._build_policy_retrieval_appendix(
+                execution_result=execution_result,
+            )
+            if retrieval_appendix:
+                final_reply = f"{final_reply}\n\n{retrieval_appendix}"
+
             return final_reply, False, None
         
         if intent == "course_plan_generate":
@@ -1129,3 +1139,58 @@ class AgentSessionService:
                     )
 
         return "\n".join(lines)
+
+    def _build_policy_retrieval_appendix(
+        self,
+        *,
+        execution_result: dict,
+    ) -> str:
+        tool_results = execution_result.get("tool_results", {})
+        policy_result = tool_results.get("query_policy_knowledge", {})
+        items = policy_result.get("items", [])
+
+        if not items:
+            return ""
+
+        lines = ["检索依据："]
+        filtered_items: list[dict] = []
+        seen_keys: set[str] = set()
+        seen_filenames: set[str] = set()
+        for item in items:
+            dedupe_key = self._build_policy_item_key(item)
+            if not dedupe_key or dedupe_key in seen_keys:
+                continue
+
+            filename = (item.get("filename") or "").strip().lower()
+            if filename in seen_filenames:
+                continue
+
+            seen_keys.add(dedupe_key)
+            seen_filenames.add(filename)
+            filtered_items.append(item)
+            if len(filtered_items) >= 3:
+                break
+
+        for idx, item in enumerate(filtered_items, start=1):
+            filename = item.get("filename") or "unknown"
+            score = float(item.get("score", 0.0))
+            content = (item.get("content") or "").strip().replace("\n", " ")
+            snippet = content[:180]
+            lines.append(f"{idx}. [{filename}] (score={score:.2f}) {snippet}")
+
+        return "\n".join(lines)
+
+    def _build_policy_item_key(self, item: dict) -> str:
+        import re
+
+        filename = (item.get("filename") or "").strip().lower()
+        content = (item.get("content") or "").strip().replace("\n", " ")
+        normalized = " ".join(content.split())
+
+        marker_match = re.search(
+            r"第[一二三四五六七八九十百千零两0-9]+(条|章)", normalized
+        )
+        if marker_match:
+            return f"{filename}:{marker_match.group(0)}"
+
+        return f"{filename}:{normalized[:160]}"

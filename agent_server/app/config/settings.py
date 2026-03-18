@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     rag_top_k: int = 3
     rag_chunk_size: int = 300
     rag_chunk_overlap: int = 50
+    policy_handbook_enabled: bool = True
+    policy_handbook_sql_top_k: int = 3
+    policy_handbook_vector_top_k: int = 3
+    policy_handbook_jsonl_path: str = "docs/knowledge/policy_handbook_nodes.jsonl"
+    policy_handbook_auto_seed_on_startup: bool = True
 
     embedding_provider: str = "local"   # local / openai
     embedding_api_key: str | None = None

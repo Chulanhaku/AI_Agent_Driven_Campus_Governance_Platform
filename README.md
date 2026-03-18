@@ -26,6 +26,17 @@ alembic upgrade head // to migration
 // if you just want to update local sql just pull and run 
 alembic upgrade head
 
+seed Shanghai University handbook data (policy_handbook_nodes):
+python database/seeds/seed_policy_handbook.py
+
+if you only have sqlite source, convert to jsonl first:
+python database/seeds/convert_handbook_sqlite_to_jsonl.py
+
+default seed source file:
+agent_server/docs/knowledge/policy_handbook_nodes.jsonl
+
+handbook jsonl will also be used for vector indexing by clause + metadata.
+
 python version 3.12.8
 
 
@@ -40,4 +51,4 @@ deactivate
 pip
 pip install -r requirements.txt
 
-# ///
+# ///
