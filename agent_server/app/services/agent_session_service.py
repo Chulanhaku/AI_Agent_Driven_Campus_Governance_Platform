@@ -35,7 +35,7 @@ from app.services.resource_booking_service import ResourceBookingService
 from app.services.resource_service import ResourceService
 from app.tools.resource_booking_tools import QueryAvailableResourcesTool, SubmitResourceBookingTool
 from app.workflows.resource_booking_workflow import ResourceBookingWorkflow
-
+from app.utils.semester_utils import SemesterUtils
 
 logger = logging.getLogger(__name__)
 
@@ -516,40 +516,108 @@ class AgentSessionService:
         )
         slot_memory = memory_context.get("slot_memory", {})
 
-        intent = self.router.detect_intent(
+        # intent = self.router.detect_intent(
+        #     message=user_message,
+        #     memory_context=memory_context,
+        # )
+        # secondary_intents = self.router.detect_secondary_intents(user_message)
+
+        # amount = self.router.extract_amount(user_message)
+        # leave_days = self.router.extract_leave_days(user_message)
+        # leave_reason = self.router.extract_leave_reason(user_message)
+        # selected_plan_index = self.router.extract_selected_plan_index(user_message)
+
+        # explicit_resource_type = self.router.extract_resource_type(user_message)
+        # booking_time_range = self.router.extract_booking_time_range(user_message)
+        # selected_resource_index = self.router.extract_candidate_index(user_message)
+
+
+        parsed_request = self.router.parse_request(
             message=user_message,
-            memory_context=memory_context,
+            memory_summary=memory_context.get("summary_text"),
         )
-        secondary_intents = self.router.detect_secondary_intents(user_message)
 
-        amount = self.router.extract_amount(user_message)
-        leave_days = self.router.extract_leave_days(user_message)
-        leave_reason = self.router.extract_leave_reason(user_message)
-        selected_plan_index = self.router.extract_selected_plan_index(user_message)
+        intent = parsed_request["primary_intent"]
+        secondary_intents = parsed_request["secondary_intents"]
+        parsed_slots = parsed_request["slots"]
 
-        explicit_resource_type = self.router.extract_resource_type(user_message)
-        booking_time_range = self.router.extract_booking_time_range(user_message)
-        selected_resource_index = self.router.extract_candidate_index(user_message)
+        amount = parsed_slots.get("amount")
+        leave_days = parsed_slots.get("leave_days")
+        leave_reason = parsed_slots.get("leave_reason")
 
-        # plan to change position
-        resource_booking_memory = memory_context.get("slot_memory", {}).get("resource_booking", {})
+        explicit_semester = parsed_slots.get("semester")
+        explicit_resource_type = parsed_slots.get("resource_type")
+        resolved_selected_resource_index_from_parse = parsed_slots.get("selected_resource_index")
+        selected_resource_index = resolved_selected_resource_index_from_parse
+        selected_plan_index_from_parse = parsed_slots.get("selected_plan_index")
+        selected_plan_index = selected_plan_index_from_parse
+        parsed_booking_start_time = parsed_slots.get("booking_start_time")
+        parsed_booking_end_time = parsed_slots.get("booking_end_time")
 
+        slot_memory = memory_context.get("slot_memory", {})
+
+        memory_semester = slot_memory.get("semester")
+        resolved_semester = (
+            explicit_semester
+            or memory_semester
+            or SemesterUtils.get_current_semester()
+        )
+
+        resource_booking_memory = slot_memory.get("resource_booking", {})
         resolved_resource_type = (
             explicit_resource_type
             or resource_booking_memory.get("resource_type")
         )
 
         resolved_booking_start_time = (
-            booking_time_range[0] if booking_time_range else resource_booking_memory.get("start_time")
+            parsed_booking_start_time
+            or resource_booking_memory.get("start_time")
         )
         resolved_booking_end_time = (
-            booking_time_range[1] if booking_time_range else resource_booking_memory.get("end_time")
+            parsed_booking_end_time
+            or resource_booking_memory.get("end_time")
         )
 
         resolved_selected_resource_index = (
-            selected_resource_index
+            resolved_selected_resource_index_from_parse
             or resource_booking_memory.get("selected_resource_index")
         )
+
+        course_plan_memory = slot_memory.get("course_plan_generate", {})
+        resolved_selected_plan_index = (
+            selected_plan_index_from_parse
+            or course_plan_memory.get("selected_plan_index")
+        )
+
+        self.audit_service.record(
+            user_id=current_user.id,
+            action="agent.request.parsed",
+            target_type="agent_session",
+            target_id=session_id,
+            detail_json={
+                "user_message": user_message,
+                "parsed_request": parsed_request,
+            },
+        )
+        # plan to change position
+        # resource_booking_memory = memory_context.get("slot_memory", {}).get("resource_booking", {})
+
+        # resolved_resource_type = (
+        #     explicit_resource_type
+        #     or resource_booking_memory.get("resource_type")
+        # )
+
+        # resolved_booking_start_time = (
+        #     booking_time_range[0] if booking_time_range else resource_booking_memory.get("start_time")
+        # )
+        # resolved_booking_end_time = (
+        #     booking_time_range[1] if booking_time_range else resource_booking_memory.get("end_time")
+        # )
+
+        # resolved_selected_resource_index = (
+        #     selected_resource_index
+        #     or resource_booking_memory.get("selected_resource_index")
+        # )
 
         if intent == "fallback":
             pending_intent = slot_memory.get("pending_intent")
@@ -591,6 +659,20 @@ class AgentSessionService:
         if intent == "campus_card_topup" and not amount:
             amount = llm_slots.get("amount")
 
+        if intent == "resource_booking_generate":
+            if not explicit_resource_type:
+                explicit_resource_type = llm_slots.get("resource_type")
+
+            if not parsed_booking_start_time:
+                parsed_booking_start_time = llm_slots.get("booking_start_time")
+
+            if not parsed_booking_end_time:
+                parsed_booking_end_time = llm_slots.get("booking_end_time")
+
+        if intent == "resource_booking_submit":
+            if not resolved_selected_resource_index_from_parse:
+                resolved_selected_resource_index_from_parse = llm_slots.get("selected_resource_index")
+
         if intent == "leave_create":
             if not leave_days:
                 leave_days = llm_slots.get("days")
@@ -614,14 +696,14 @@ class AgentSessionService:
         context["amount"] = amount
         context["leave_days"] = leave_days
         context["leave_reason"] = leave_reason
-        context["semester"] = "2026-spring"   # for course planning, hardcoded for now, can be extracted from message or user profile in the future
-
-        #
+        context["semester"] = resolved_semester
         context["resource_type"] = resolved_resource_type
         context["booking_start_time"] = resolved_booking_start_time
         context["booking_end_time"] = resolved_booking_end_time
         context["selected_resource_index"] = resolved_selected_resource_index
+        context["selected_plan_index"] = resolved_selected_plan_index
         #
+        #3/23 /changed  / not sure if need to save to context
         if selected_plan_index is None:
             selected_plan_index = (
                 memory_context.get("slot_memory", {})
@@ -629,7 +711,7 @@ class AgentSessionService:
                 .get("selected_plan_index")
             )
 
-        context["selected_plan_index"] = selected_plan_index
+        #context["selected_plan_index"] = selected_plan_index
 
         use_llm_planner = self.prompt_manager.should_use_llm_planner(
             primary_intent=intent,

@@ -15,14 +15,14 @@ class BaseLlmProvider(ABC):
     def extract_slots(self, *, intent: str, message: str) -> dict:
         raise NotImplementedError
     
-    # @abstractmethod
-    # def parse_user_request(
-    #     self,
-    #     *,
-    #     message: str,
-    #     memory_summary: str | None = None,
-    # ) -> dict:
-    #     raise NotImplementedError
+    @abstractmethod
+    def parse_user_request(
+        self,
+        *,
+        message: str,
+        memory_summary: str | None = None,
+    ) -> dict:
+        raise NotImplementedError
 
     @abstractmethod
     def generate_fallback_reply(self, *, user_name: str, message: str) -> str:

@@ -49,7 +49,19 @@ class LocalLlmProvider(BaseLlmProvider):
         if recent_messages_text:
             return f"会话摘要：{recent_messages_text[:160]}"
         return existing_summary or ""
-
+    
+    def parse_user_request(
+        self,
+        *,
+        message: str,
+        memory_summary: str | None = None,
+    ) -> dict:
+        return {
+            "primary_intent": "fallback",
+            "secondary_intents": [],
+            "slots": {},
+        }
+    
     def compose_tool_response(
         self,
         *,

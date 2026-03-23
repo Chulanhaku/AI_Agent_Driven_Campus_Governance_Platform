@@ -22,6 +22,83 @@ class OpenAiProvider(BaseLlmProvider):
         self.model = settings.openai_model
         self.output_parser = OutputParser()
 
+
+    def parse_user_request(
+        self,
+        *,
+        message: str,
+        memory_summary: str | None = None,
+    ) -> dict:
+        prompt = f"""
+你是一个校园事务 Agent 的请求解析器。
+请从用户输入中提取：
+1. primary_intent
+2. secondary_intents
+3. slots
+
+请只输出 JSON，不要输出任何额外文字。
+
+支持的 primary_intent:
+- query_schedule
+- campus_card_topup
+- leave_create
+- policy_qa
+- course_plan_generate
+- course_plan_submit
+- resource_booking_generate
+- resource_booking_submit
+- fallback
+
+支持的 secondary_intents:
+- time_planning_advice
+- weekly_busyness_analysis
+
+请提取可能的 slots：
+- amount: 字符串或 null
+- leave_days: 整数或 null
+- leave_reason: 字符串或 null
+- semester: 例如 "2026-spring" 或 null
+- resource_type: library_seat / study_room / meeting_room / lab_room / null
+- booking_start_time: ISO 8601 字符串或 null
+- booking_end_time: ISO 8601 字符串或 null
+- selected_plan_index: 整数或 null
+- selected_resource_index: 整数或 null
+
+要求：
+1. 不确定就填 null 或 []
+2. 不要编造事实
+3. 如果用户是多意图表达，要尽量识别 secondary_intents
+4. 如果用户只是在选择之前的方案或资源，也要识别 submit 类 intent
+
+会话摘要：
+{memory_summary or "无"}
+
+用户消息：
+{message}
+
+输出示例：
+{{
+  "primary_intent": "resource_booking_generate",
+  "secondary_intents": [],
+  "slots": {{
+    "amount": null,
+    "leave_days": null,
+    "leave_reason": null,
+    "semester": null,
+    "resource_type": "study_room",
+    "booking_start_time": "2026-03-24T14:00:00",
+    "booking_end_time": "2026-03-24T16:00:00",
+    "selected_plan_index": null,
+    "selected_resource_index": null
+  }}
+}}
+""".strip()
+
+        content = self._chat(prompt)
+        return self.output_parser.parse_json(content)
+
+
+
     def classify_intent(
         self,
         *,
@@ -39,6 +116,8 @@ class OpenAiProvider(BaseLlmProvider):
 - policy_qa
 - course_plan_generate
 - course_plan_submit
+- resource_booking_generate
+- resource_booking_submit
 - fallback
 
 分类规则：
@@ -48,6 +127,8 @@ class OpenAiProvider(BaseLlmProvider):
 如果结合最近对话可知是在确认已生成的选课方案，优先返回 course_plan_submit
 4. 用户询问制度、规则、流程、条件，或提到“学生手册”“第X章”“第X条”时，返回 policy_qa
 5. 无法确定时返回 fallback
+6.如果用户是在找图书馆座位、自习室、会议室、实验室并希望预约，分类为 resource_booking_generate。
+如果用户是在已有候选资源中选择某个资源，例如“选第一个”“预约这个”“就这个”，分类为 resource_booking_submit。
 
 最近对话：
 {recent_messages_text or "无"}
@@ -81,25 +162,33 @@ class OpenAiProvider(BaseLlmProvider):
 - reason: 字符串，无法提取则为 null
 - leave_type: 固定返回 "sick"
 
-如果 intent == course_plan_generate，请提取:
-- semester: 字符串，格式统一为 "2026-spring"，无法提取则为 null
-
 如果 intent == course_plan_submit，请提取:
-- selected_plan_index: 整数，例如“方案1”“第一套”提取为 1，无法提取则为 null
+- selected_plan_index: 整数，无法提取则为 null
 
-如果 intent == query_schedule 或 policy_qa，可返回空对象。
+如果 intent == resource_booking_generate，请提取:
+- resource_type: library_seat / study_room / meeting_room / lab_room / null
+- booking_start_time: ISO 8601 字符串或 null
+- booking_end_time: ISO 8601 字符串或 null
+
+如果 intent == resource_booking_submit，请提取:
+- selected_resource_index: 整数，无法提取则为 null
+
+如果 intent == query_schedule 或 policy_qa 或 course_plan_generate，可返回空对象。
 
 用户消息:
 {message}
 
 输出示例:
 {{
-  "amount": "50",
-  "days": 2,
-  "reason": "发烧",
+  "amount": null,
+  "days": null,
+  "reason": null,
   "leave_type": "sick",
-  "semester": "2026-spring",
-  "selected_plan_index": 1
+  "selected_plan_index": null,
+  "resource_type": "study_room",
+  "booking_start_time": "2026-03-24T14:00:00",
+  "booking_end_time": "2026-03-24T16:00:00",
+  "selected_resource_index": null
 }}
 """.strip()
 
