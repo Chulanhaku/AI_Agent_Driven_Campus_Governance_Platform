@@ -31,6 +31,11 @@ from app.services.course_plan_service import CoursePlanService
 from app.tools.course_plan_tools import GenerateCoursePlanTool, SubmitCoursePlanTool
 from app.services.course_enrollment_service import CourseEnrollmentService
 from app.workflows.course_plan_workflow import CoursePlanWorkflow
+from app.services.resource_booking_service import ResourceBookingService
+from app.services.resource_service import ResourceService
+from app.tools.resource_booking_tools import QueryAvailableResourcesTool, SubmitResourceBookingTool
+from app.workflows.resource_booking_workflow import ResourceBookingWorkflow
+
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +56,8 @@ class AgentSessionService:
         rag_top_k: int,
         course_plan_service: CoursePlanService,
         course_enrollment_service: CourseEnrollmentService,
+        resource_service: ResourceService,
+        resource_booking_service: ResourceBookingService,
     ) -> None:
         self.agent_session_repository = agent_session_repository
         self.pending_action_repository = pending_action_repository
@@ -78,6 +85,9 @@ class AgentSessionService:
 
         self.course_plan_service = course_plan_service
         self.course_enrollment_service = course_enrollment_service
+
+        self.resource_service = resource_service
+        self.resource_booking_service = resource_booking_service
 
     def get_user_session(self, session_id: int, user_id: int) -> AgentSession | None:
         return self.agent_session_repository.get_session_by_id_and_user_id(
@@ -393,6 +403,66 @@ class AgentSessionService:
                         "result": result.get("data"),
                     },
                 )
+            elif action.action_type == "resource_booking_submit":
+                resource_id = int(action.payload_json["resource_id"])
+                booking_type = str(action.payload_json["booking_type"])
+                start_time = str(action.payload_json["start_time"])
+                end_time = str(action.payload_json["end_time"])
+
+                tool = SubmitResourceBookingTool(self.resource_booking_service)
+
+                tool_log = self.tool_execution_log_service.start_log(
+                    session_id=session.id,
+                    tool_name=tool.name,
+                    input_json={
+                        "user_id": current_user.id,
+                        "resource_id": resource_id,
+                        "booking_type": booking_type,
+                        "start_time": start_time,
+                        "end_time": end_time,
+                    },
+                )
+
+                try:
+                    result = tool.run(
+                        user_id=current_user.id,
+                        resource_id=resource_id,
+                        booking_type=booking_type,
+                        start_time=start_time,
+                        end_time=end_time,
+                    )
+                    self.tool_execution_log_service.finish_log(
+                        log=tool_log,
+                        output_json=result,
+                        status="success",
+                    )
+                except Exception as exc:
+                    self.tool_execution_log_service.finish_log(
+                        log=tool_log,
+                        output_json={"error": str(exc)},
+                        status="failed",
+                    )
+                    raise
+
+                self.pending_action_repository.update_status(action=action, status="approved")
+
+                assistant_text = self.response_formatter.format(
+                    intent="resource_booking_submit",
+                    result=result,
+                )
+
+                self.audit_service.record(
+                    user_id=current_user.id,
+                    action="resource_booking.submit",
+                    target_type="pending_action",
+                    target_id=action.id,
+                    detail_json={
+                        "resource_id": resource_id,
+                        "booking_type": booking_type,
+                        "session_id": session.id,
+                        "result": result,
+                    },
+                )
             else:
                 raise ValueError(f"Unsupported action type: {action.action_type}")
 
@@ -421,11 +491,13 @@ class AgentSessionService:
         balance_tool = QueryCampusCardBalanceTool(self.campus_card_service)
         rag_tool = QueryPolicyKnowledgeTool(self.retriever, top_k=self.rag_top_k)
         course_plan_tool = GenerateCoursePlanTool(self.course_plan_service)
+        resource_query_tool = QueryAvailableResourcesTool(self.resource_service)
 
         tool_registry.register(schedule_tool)
         tool_registry.register(balance_tool)
         tool_registry.register(rag_tool)
         tool_registry.register(course_plan_tool)
+        tool_registry.register(resource_query_tool)
 
         persisted_memory_obj = self.agent_memory_service.get_session_memory(session_id)
         persisted_memory = None
@@ -455,7 +527,29 @@ class AgentSessionService:
         leave_reason = self.router.extract_leave_reason(user_message)
         selected_plan_index = self.router.extract_selected_plan_index(user_message)
 
+        explicit_resource_type = self.router.extract_resource_type(user_message)
+        booking_time_range = self.router.extract_booking_time_range(user_message)
+        selected_resource_index = self.router.extract_candidate_index(user_message)
 
+        # plan to change position
+        resource_booking_memory = memory_context.get("slot_memory", {}).get("resource_booking", {})
+
+        resolved_resource_type = (
+            explicit_resource_type
+            or resource_booking_memory.get("resource_type")
+        )
+
+        resolved_booking_start_time = (
+            booking_time_range[0] if booking_time_range else resource_booking_memory.get("start_time")
+        )
+        resolved_booking_end_time = (
+            booking_time_range[1] if booking_time_range else resource_booking_memory.get("end_time")
+        )
+
+        resolved_selected_resource_index = (
+            selected_resource_index
+            or resource_booking_memory.get("selected_resource_index")
+        )
 
         if intent == "fallback":
             pending_intent = slot_memory.get("pending_intent")
@@ -522,6 +616,12 @@ class AgentSessionService:
         context["leave_reason"] = leave_reason
         context["semester"] = "2026-spring"   # for course planning, hardcoded for now, can be extracted from message or user profile in the future
 
+        #
+        context["resource_type"] = resolved_resource_type
+        context["booking_start_time"] = resolved_booking_start_time
+        context["booking_end_time"] = resolved_booking_end_time
+        context["selected_resource_index"] = resolved_selected_resource_index
+        #
         if selected_plan_index is None:
             selected_plan_index = (
                 memory_context.get("slot_memory", {})
@@ -683,7 +783,70 @@ class AgentSessionService:
                 },
             )
             return response_text, True, pending_action.id
+
+        if first_step_type == "create_pending_resource_booking":
+            slot_memory = memory_context.get("slot_memory", {})
+            booking_memory = slot_memory.get("resource_booking", {})
+            last_candidates = booking_memory.get("last_candidates", [])
+            selected_resource_index = context.get("selected_resource_index")
+
+            if not selected_resource_index:
+                return "我识别到你想提交资源预约，但没有解析到候选资源编号。比如你可以说：选第一个。", False, None
+
+            if not last_candidates:
+                return "当前会话中还没有可提交的候选资源，请先让我帮你查找可预约资源。", False, None
+
+            if selected_resource_index < 1 or selected_resource_index > len(last_candidates):
+                return f"候选资源编号超出范围。当前共有 {len(last_candidates)} 个候选资源。", False, None
+
+            selected_resource = last_candidates[selected_resource_index - 1]
+            resource_id = selected_resource["resource_id"]
+            booking_type = selected_resource["resource_type"]
+            start_time = booking_memory.get("start_time")
+            end_time = booking_memory.get("end_time")
+
+            if not start_time or not end_time:
+                return "当前会话中缺少预约时间信息，请重新描述一下预约时间。", False, None
+
+            workflow = ResourceBookingWorkflow(self.pending_action_repository)
+            pending_action = workflow.create_pending_booking(
+                current_user=current_user,
+                session_id=session_id,
+                resource_id=resource_id,
+                booking_type=booking_type,
+                start_time=start_time,
+                end_time=end_time,
+                selected_resource=selected_resource,
+                selected_resource_index=selected_resource_index,
+            )
+
+            self.audit_service.record(
+                user_id=current_user.id,
+                action="pending_action.create",
+                target_type="pending_action",
+                target_id=pending_action.id,
+                detail_json={
+                    "action_type": "resource_booking_submit",
+                    "resource_id": resource_id,
+                    "resource_type": booking_type,
+                    "session_id": session_id,
+                },
+            )
+
+            response_text = self.response_formatter.format(
+                intent="resource_booking_submit",
+                result={
+                    "requires_confirmation": True,
+                    "selected_resource_index": selected_resource_index,
+                    "resource_name": selected_resource["resource_name"],
+                    "action_id": pending_action.id,
+                },
+            )
+            return response_text, True, pending_action.id
+
         print("Generated plan:", plan)
+
+
         execution_result = self._execute_multistep_plan(
             session_id=session_id,
             plan=plan,
@@ -812,9 +975,54 @@ class AgentSessionService:
                 slot_snapshot_json=updated_slot_snapshot,
             )
             return final_reply, False, None
+        
+        if intent == "resource_booking_generate":
+            self.audit_service.record(
+                user_id=current_user.id,
+                action="resource_booking.query",
+                target_type="agent_session",
+                target_id=session_id,
+                detail_json={
+                    "message": user_message,
+                    "resource_type": resolved_resource_type,
+                },
+            )
 
+            tool_result_summary = self._build_tool_result_summary(
+                primary_intent=intent,
+                execution_result=execution_result,
+            )
+
+            updated_slot_snapshot = memory_context.get("slot_memory", {}).copy()
+            resource_result = execution_result.get("tool_results", {}).get("query_available_resources", {})
+
+            updated_slot_snapshot["resource_booking"] = {
+                "resource_type": resource_result.get("resource_type") or resolved_resource_type,
+                "start_time": resolved_booking_start_time,
+                "end_time": resolved_booking_end_time,
+                "last_candidates": resource_result.get("items", []),
+                "selected_resource_index": None,
+            }
+
+            self.agent_memory_service.save_memory_snapshot(
+                session_id=session_id,
+                summary_text=memory_context.get("summary_text"),
+                current_intent="resource_booking_generate",
+                slot_snapshot_json=updated_slot_snapshot,
+            )
+
+            final_reply = self.response_composer.compose(
+                user_name=current_user.full_name,
+                user_message=user_message,
+                primary_intent=intent,
+                secondary_intents=secondary_intents,
+                tool_result_summary=tool_result_summary,
+                reasoning_result_summary=None,
+                memory_summary=memory_context.get("summary_text"),
+            )
+            return final_reply, False, None
         return self.response_formatter.format(intent=intent, result=execution_result), False, None
-    
+
     # old query
         # result = self._execute_logged_tool(
         #     session_id=session_id,
@@ -1106,7 +1314,12 @@ class AgentSessionService:
                 intent="course_plan_generate",
                 result=course_plan_result,
             )
-
+        if primary_intent == "resource_booking_generate":
+            resource_result = tool_results.get("query_available_resources", {})
+            return self.response_formatter.format(
+                intent="resource_booking_generate",
+                result=resource_result,
+            )
         return "已完成相关工具调用。"
 
     def _build_reasoning_result_summary(

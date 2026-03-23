@@ -102,5 +102,42 @@ class ResponseFormatter:
             for item in items:
                 lines.append(f"[{item['filename']}] {item['content']}")
             return "\n\n".join(lines)
+    
+        if intent == "resource_booking_generate" and result.get("success"):
+            items = result.get("items", [])
+            resource_type = result.get("resource_type")
 
+            if not items:
+                return f"当前没有可预约的 {resource_type} 资源。"
+
+            lines = [f"我为你找到 {len(items)} 个可预约资源："]
+            for idx, item in enumerate(items[:5], start=1):
+                lines.append(
+                    f"第 {idx} 个："
+                    f"{item['resource_name']} "
+                    f"（位置：{item['location'] or '未填写'}，"
+                    f"容量：{item['capacity']}）"
+                )
+            lines.append("你可以直接说“选第一个”或“预约第2个”。")
+            return "\n".join(lines)
+        if intent == "resource_booking_submit" and result.get("requires_confirmation"):
+            action_id = result.get("action_id")
+            selected_resource_index = result.get("selected_resource_index")
+            resource_name = result.get("resource_name")
+            return (
+                f"即将预约第 {selected_resource_index} 个资源：{resource_name}。\n"
+                f"请确认本次操作。待确认动作 ID：{action_id}"
+            )
+
+        if intent == "resource_booking_submit" and result.get("success"):
+            return (
+                f"资源预约成功。\n"
+                f"预约单号：{result['booking_id']}\n"
+                f"资源编号：{result['resource_id']}\n"
+                f"预约类型：{result['booking_type']}\n"
+                f"开始时间：{result['start_time']}\n"
+                f"结束时间：{result['end_time']}\n"
+                f"签到截止：{result['check_in_deadline']}\n"
+                f"状态：{result['status']}"
+            )
         return "当前没有可用的工具结果摘要。"

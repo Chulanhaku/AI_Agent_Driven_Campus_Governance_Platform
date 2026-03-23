@@ -166,7 +166,39 @@ class Planner:
                     }
                 ],
             }
+        if intent == "resource_booking_generate":
+            return {
+                "plan_type": "multi_step",
+                "steps": [
+                    {
+                        "type": "call_tool",
+                        "tool_name": "query_available_resources",
+                        "params": {
+                            "resource_type": context.get("resource_type"),
+                            "start_time": context.get("booking_start_time"),
+                            "end_time": context.get("booking_end_time"),
+                        },
+                    },
+                    {
+                        "type": "compose",
+                    },
+                ],
+            }
 
+        if intent == "resource_booking_submit":
+            return {
+                "plan_type": "workflow",
+                "steps": [
+                    {
+                        "type": "create_pending_resource_booking",
+                        "params": {
+                            "user_id": context["current_user"]["id"],
+                            "session_id": context["session_id"],
+                            "selected_resource_index": context.get("selected_resource_index"),
+                        },
+                    }
+                ],
+            }
         return {
             "plan_type": "fallback",
             "steps": [

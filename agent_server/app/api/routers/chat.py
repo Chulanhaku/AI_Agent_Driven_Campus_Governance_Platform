@@ -35,6 +35,11 @@ from app.db.repositories.course_prerequisite_repository import CoursePrerequisit
 from app.services.course_plan_service import CoursePlanService
 from app.db.repositories.course_enrollment_repository import CourseEnrollmentRepository
 from app.services.course_enrollment_service import CourseEnrollmentService
+from app.db.repositories.integrity_score_repository import IntegrityScoreRepository
+from app.db.repositories.resource_booking_repository import ResourceBookingRepository
+from app.db.repositories.resource_repository import ResourceRepository
+from app.services.resource_booking_service import ResourceBookingService
+from app.services.resource_service import ResourceService
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -58,7 +63,9 @@ def get_agent_session_service(
     completed_course_repository = CompletedCourseRepository(db)
     course_prerequisite_repository = CoursePrerequisiteRepository(db)
     course_enrollment_repository = CourseEnrollmentRepository(db)
-
+    resource_repository = ResourceRepository(db)
+    resource_booking_repository = ResourceBookingRepository(db)
+    integrity_score_repository = IntegrityScoreRepository(db)
 
     schedule_service = ScheduleService(schedule_repository)
     campus_card_service = CampusCardService(campus_card_repository)
@@ -76,6 +83,11 @@ def get_agent_session_service(
     course_enrollment_service = CourseEnrollmentService(
         course_enrollment_repository=course_enrollment_repository,
     )
+    resource_service = ResourceService(resource_repository)
+    resource_booking_service = ResourceBookingService(
+        resource_booking_repository=resource_booking_repository,
+        integrity_score_repository=integrity_score_repository,
+    )
 
     return AgentSessionService(
         agent_session_repository=agent_session_repository,
@@ -91,6 +103,8 @@ def get_agent_session_service(
         rag_top_k=settings.rag_top_k,
         course_plan_service=course_plan_service,
         course_enrollment_service=course_enrollment_service,
+        resource_service=resource_service,
+        resource_booking_service=resource_booking_service,
     )
 
 def get_tool_execution_log_service(

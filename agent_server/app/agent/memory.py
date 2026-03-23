@@ -112,6 +112,29 @@ class MemoryManager:
                     or persisted_slot_memory.get("course_plan_generate", {}).get("selected_plan_index")
                 ),
             },
+            "resource_booking": {
+                "resource_type": (
+                    runtime_slot_memory.get("resource_booking", {}).get("resource_type")
+                    or persisted_slot_memory.get("resource_booking", {}).get("resource_type")
+                ),
+                "start_time": (
+                    runtime_slot_memory.get("resource_booking", {}).get("start_time")
+                    or persisted_slot_memory.get("resource_booking", {}).get("start_time")
+                ),
+                "end_time": (
+                    runtime_slot_memory.get("resource_booking", {}).get("end_time")
+                    or persisted_slot_memory.get("resource_booking", {}).get("end_time")
+                ),
+                "last_candidates": (
+                    runtime_slot_memory.get("resource_booking", {}).get("last_candidates")
+                    or persisted_slot_memory.get("resource_booking", {}).get("last_candidates")
+                    or []
+                ),
+                "selected_resource_index": (
+                    runtime_slot_memory.get("resource_booking", {}).get("selected_resource_index")
+                    or persisted_slot_memory.get("resource_booking", {}).get("selected_resource_index")
+                ),
+            },
         }
         return merged
 
@@ -169,6 +192,13 @@ class MemoryManager:
                 "last_generated_plans": [],
                 "selected_plan_index": None,
             },
+            "resource_booking": {
+                "resource_type": None,
+                "start_time": None,
+                "end_time": None,
+                "last_candidates": [],
+                "selected_resource_index": None,
+            },
         }
 
         for item in messages:
@@ -203,6 +233,18 @@ class MemoryManager:
             if reason is not None:
                 slot_memory["leave_create"]["reason"] = reason
 
+            resource_type = self._extract_resource_type(content)
+            if resource_type is not None:
+                slot_memory["resource_booking"]["resource_type"] = resource_type
+
+            time_range = self._extract_booking_time_range(content)
+            if time_range is not None:
+                slot_memory["resource_booking"]["start_time"] = time_range[0]
+                slot_memory["resource_booking"]["end_time"] = time_range[1]
+
+            candidate_index = self._extract_candidate_index(content)
+            if candidate_index is not None:
+                slot_memory["resource_booking"]["selected_resource_index"] = candidate_index
         return slot_memory
 
     def _extract_amount(self, message: str) -> str | None:
@@ -259,3 +301,54 @@ class MemoryManager:
             content=json.dumps(current_slot_memory, ensure_ascii=False),
             message_type="slot_memory",
         )
+
+    def _extract_resource_type(self, message: str) -> str | None:
+        normalized = message.strip().lower()
+
+        if "图书馆" in normalized or "座位" in normalized:
+            return "library_seat"
+        if "自习室" in normalized:
+            return "study_room"
+        if "会议室" in normalized:
+            return "meeting_room"
+        if "实验室" in normalized:
+            return "lab_room"
+        return None
+
+    def _extract_candidate_index(self, message: str) -> int | None:
+        import re
+
+        match = re.search(r"第\s*(\d+)\s*个", message)
+        if match:
+            return int(match.group(1))
+
+        match = re.search(r"选\s*(\d+)", message)
+        if match:
+            return int(match.group(1))
+
+        return None
+
+    def _extract_booking_time_range(self, message: str) -> tuple[str, str] | None:
+        from datetime import datetime, timedelta
+
+        normalized = message.strip().lower()
+        now = datetime.now()
+
+        start = now + timedelta(hours=1)
+        end = start + timedelta(hours=2)
+
+        if "明天" in normalized:
+            start = start + timedelta(days=1)
+            end = end + timedelta(days=1)
+
+        if "下午" in normalized:
+            start = start.replace(hour=14, minute=0, second=0, microsecond=0)
+            end = start.replace(hour=16, minute=0, second=0, microsecond=0)
+        elif "上午" in normalized:
+            start = start.replace(hour=9, minute=0, second=0, microsecond=0)
+            end = start.replace(hour=11, minute=0, second=0, microsecond=0)
+        elif "晚上" in normalized:
+            start = start.replace(hour=19, minute=0, second=0, microsecond=0)
+            end = start.replace(hour=21, minute=0, second=0, microsecond=0)
+
+        return start.isoformat(), end.isoformat()

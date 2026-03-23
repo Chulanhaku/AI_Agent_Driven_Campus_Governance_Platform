@@ -88,3 +88,20 @@ class User(Base, TimestampMixin):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+
+    resource_bookings = relationship(
+        "ResourceBooking",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+    integrity_score_records = relationship(
+        "IntegrityScoreRecord",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    notifications = relationship(
+        "Notification",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )

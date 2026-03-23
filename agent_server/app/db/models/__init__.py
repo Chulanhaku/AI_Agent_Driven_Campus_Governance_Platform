@@ -22,7 +22,8 @@ from app.db.models.leave_request import LeaveRequest
 from app.db.models.approval_record import ApprovalRecord
 from app.db.models.audit_log import AuditLog
 from app.db.models.tool_execution_log import ToolExecutionLog
-
+from app.db.models.resourse_booking import ResourceBooking,Resource,IntegrityScoreRecord
+from app.db.models.notification import Notification
 __all__ = [
     "Role",
     "Permission",
@@ -49,4 +50,8 @@ __all__ = [
     "ApprovalRecord",
     "AuditLog",
     "ToolExecutionLog",
+    "ResourceBooking",
+    "Resource",
+    "IntegrityScoreRecord",
+    "Notification",
 ]
