@@ -539,6 +539,8 @@ class AgentSessionService:
 
         intent = parsed_request["primary_intent"]
         secondary_intents = parsed_request["secondary_intents"]
+        print("Parsed intent:", intent)
+        print("Parsed secondary intents:", secondary_intents)
         parsed_slots = parsed_request["slots"]
 
         amount = parsed_slots.get("amount")
@@ -549,6 +551,7 @@ class AgentSessionService:
         explicit_resource_type = parsed_slots.get("resource_type")
         resolved_selected_resource_index_from_parse = parsed_slots.get("selected_resource_index")
         selected_resource_index = resolved_selected_resource_index_from_parse
+        print("Parsed out:", selected_resource_index)
         selected_plan_index_from_parse = parsed_slots.get("selected_plan_index")
         selected_plan_index = selected_plan_index_from_parse
         parsed_booking_start_time = parsed_slots.get("booking_start_time")
@@ -582,7 +585,7 @@ class AgentSessionService:
             resolved_selected_resource_index_from_parse
             or resource_booking_memory.get("selected_resource_index")
         )
-
+        print("After resolving, selected_resource_index:", resolved_selected_resource_index)
         course_plan_memory = slot_memory.get("course_plan_generate", {})
         resolved_selected_plan_index = (
             selected_plan_index_from_parse
@@ -625,6 +628,8 @@ class AgentSessionService:
                 "campus_card_topup",
                 "leave_create",
                 "query_schedule",
+                "course_plan_submit",
+                "resource_booking_submit",
             }:
                 intent = pending_intent
 
@@ -651,6 +656,7 @@ class AgentSessionService:
             (intent == "campus_card_topup" and not amount)
             or (intent == "leave_create" and (not leave_days or not leave_reason))
             or (intent == "course_plan_submit" and not selected_plan_index)
+            or (intent == "resource_booking_submit" and not selected_resource_index)
         ):
             llm_slots = self.router.extract_slots_with_llm(intent=intent, message=user_message)
         if intent == "course_plan_submit" and not selected_plan_index:
@@ -671,7 +677,13 @@ class AgentSessionService:
 
         if intent == "resource_booking_submit":
             if not resolved_selected_resource_index_from_parse:
-                resolved_selected_resource_index_from_parse = llm_slots.get("selected_resource_index")
+                resolved_selected_resource_index = llm_slots.get("selected_resource_index")
+                print("LLM extracted selected_resource_index:", resolved_selected_resource_index)
+            if not parsed_booking_start_time:
+                parsed_booking_start_time = llm_slots.get("booking_start_time")
+
+            if not parsed_booking_end_time:
+                parsed_booking_end_time = llm_slots.get("booking_end_time")
 
         if intent == "leave_create":
             if not leave_days:
@@ -698,10 +710,11 @@ class AgentSessionService:
         context["leave_reason"] = leave_reason
         context["semester"] = resolved_semester
         context["resource_type"] = resolved_resource_type
-        context["booking_start_time"] = resolved_booking_start_time
-        context["booking_end_time"] = resolved_booking_end_time
+        context["booking_start_time"] = parsed_booking_start_time
+        context["booking_end_time"] = parsed_booking_end_time
         context["selected_resource_index"] = resolved_selected_resource_index
         context["selected_plan_index"] = resolved_selected_plan_index
+        print("service line 515 context:", context)
         #
         #3/23 /changed  / not sure if need to save to context
         if selected_plan_index is None:

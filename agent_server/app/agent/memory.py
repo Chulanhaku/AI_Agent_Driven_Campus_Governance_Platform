@@ -199,6 +199,7 @@ class MemoryManager:
                 "end_time": None,
                 "last_candidates": [],
                 "selected_resource_index": None,
+                "pending_booking": {},
             },
         }
 

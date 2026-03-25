@@ -68,7 +68,7 @@ class OpenAiProvider(BaseLlmProvider):
 1. 不确定就填 null 或 []
 2. 不要编造事实
 3. 如果用户是多意图表达，要尽量识别 secondary_intents
-4. 如果用户只是在选择之前的方案或资源，也要识别 submit 类 intent
+4. 如果用户只是在选择之前的方案或资源，也要识别 submit 类 intent,并且submit 类 intent 的优先级要高于 generate 类 intent
 
 会话摘要：
 {memory_summary or "无"}
@@ -171,7 +171,9 @@ class OpenAiProvider(BaseLlmProvider):
 - booking_end_time: ISO 8601 字符串或 null
 
 如果 intent == resource_booking_submit，请提取:
-- selected_resource_index: 整数，无法提取则为 null
+- selected_resource_index: 整数，一般用户会直接第几套就是几，无法提取则为 null
+- booking_start_time: ISO 8601 字符串或 null
+- booking_end_time: ISO 8601 字符串或 null
 
 如果 intent == query_schedule 或 policy_qa 或 course_plan_generate，可返回空对象。
 
@@ -371,6 +373,16 @@ class OpenAiProvider(BaseLlmProvider):
 5. 不要生成任何未列出的工具或步骤
 6. 对于充值和请假这类需要确认的事务，不要在这里规划 create_pending_topup / create_pending_leave，仍由系统规则处理
 7. 如果不确定，就返回 fallback
+8.当 primary_intent == course_plan_generate 时：
+- 必须优先调用 generate_course_plan
+- 不允许调用 query_available_resources
+- 如果 secondary_intents 包含 time_planning_advice，可在 generate_course_plan 后追加 reason
+- 最后追加 compose
+
+9.当 primary_intent == resource_booking_generate 时：
+- 必须优先调用 query_available_resources
+- 不允许调用 generate_course_plan
+- 如果缺少 resource_type / booking_start_time / booking_end_time，则返回 fallback
 
 用户消息：
 {user_message}
