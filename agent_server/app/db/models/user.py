@@ -105,3 +105,9 @@ class User(Base, TimestampMixin):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+    zero_form_approval_requests = relationship(
+        "ZeroFormApprovalRequest",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        foreign_keys="ZeroFormApprovalRequest.user_id",
+    )

@@ -47,6 +47,8 @@ class OpenAiProvider(BaseLlmProvider):
 - course_plan_submit
 - resource_booking_generate
 - resource_booking_submit
+- zero_form_approval_generate
+- zero_form_approval_submit
 - fallback
 
 支持的 secondary_intents:
@@ -63,12 +65,17 @@ class OpenAiProvider(BaseLlmProvider):
 - booking_end_time: ISO 8601 字符串或 null
 - selected_plan_index: 整数或 null
 - selected_resource_index: 整数或 null
+- approval_type: leave_application / outing_application / certificate_request / null
+- approval_reason: 字符串或 null
+- start_date: YYYY-MM-DD 或 null #这个是给零表单审批用的，表示请假/外出/证明的开始日期
+- end_date: YYYY-MM-DD 或 null  #对应的结束日期
 
 要求：
 1. 不确定就填 null 或 []
 2. 不要编造事实
 3. 如果用户是多意图表达，要尽量识别 secondary_intents
 4. 如果用户只是在选择之前的方案或资源，也要识别 submit 类 intent,并且submit 类 intent 的优先级要高于 generate 类 intent
+5. 如果用户是在发起审批申请，例如“帮我申请外出”“帮我开在读证明”“我要请假申请”等类似的语言，primary_intent 应为 zero_form_approval_generate。如果用户是在确认提交已经生成好的审批草稿，primary_intent 应为 zero_form_approval_submit。
 
 会话摘要：
 {memory_summary or "无"}
@@ -118,6 +125,8 @@ class OpenAiProvider(BaseLlmProvider):
 - course_plan_submit
 - resource_booking_generate
 - resource_booking_submit
+- zero_form_approval_generate
+- zero_form_approval_submit
 - fallback
 
 分类规则：
@@ -129,6 +138,7 @@ class OpenAiProvider(BaseLlmProvider):
 5. 无法确定时返回 fallback
 6.如果用户是在找图书馆座位、自习室、会议室、实验室并希望预约，分类为 resource_booking_generate。
 如果用户是在已有候选资源中选择某个资源，例如“选第一个”“预约这个”“就这个”，分类为 resource_booking_submit。
+7. 如果用户是在发起审批申请，例如“帮我申请外出”“帮我开在读证明”“我要请假申请”等类似的语言，primary_intent 应为 zero_form_approval_generate。如果用户是在确认提交已经生成好的审批草稿，primary_intent 应为 zero_form_approval_submit。
 
 最近对话：
 {recent_messages_text or "无"}

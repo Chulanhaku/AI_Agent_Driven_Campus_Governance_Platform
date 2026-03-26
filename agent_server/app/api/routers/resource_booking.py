@@ -8,6 +8,8 @@ from app.db.models import User
 from app.db.repositories.integrity_score_repository import IntegrityScoreRepository
 from app.db.repositories.resource_booking_repository import ResourceBookingRepository
 from app.services.resource_booking_service import ResourceBookingService
+from app.db.repositories.notification_repository import NotificationRepository
+from app.services.notification_service import NotificationService
 
 router = APIRouter(prefix="/resource-bookings", tags=["resource-bookings"])
 
@@ -17,10 +19,13 @@ def get_resource_booking_service(
 ) -> ResourceBookingService:
     resource_booking_repository = ResourceBookingRepository(db)
     integrity_score_repository = IntegrityScoreRepository(db)
+    notification_repository = NotificationRepository(db)
+    notification_service = NotificationService(notification_repository)
 
     return ResourceBookingService(
         resource_booking_repository=resource_booking_repository,
         integrity_score_repository=integrity_score_repository,
+        notification_service=notification_service,
     )
 
 

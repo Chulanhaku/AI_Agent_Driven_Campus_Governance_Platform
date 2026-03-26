@@ -24,6 +24,7 @@ from app.db.models.audit_log import AuditLog
 from app.db.models.tool_execution_log import ToolExecutionLog
 from app.db.models.resourse_booking import ResourceBooking,Resource,IntegrityScoreRecord
 from app.db.models.notification import Notification
+from app.db.models.zero_form_approval import ApprovalTemplate, ZeroFormApprovalRequest
 __all__ = [
     "Role",
     "Permission",
@@ -54,4 +55,6 @@ __all__ = [
     "Resource",
     "IntegrityScoreRecord",
     "Notification",
+    "ApprovalTemplate",
+    "ZeroFormApprovalRequest",
 ]

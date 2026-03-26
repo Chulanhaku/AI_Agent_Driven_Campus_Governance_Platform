@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 
 from app.db.repositories.integrity_score_repository import IntegrityScoreRepository
 from app.db.repositories.resource_booking_repository import ResourceBookingRepository
+from app.services.notification_service import NotificationService
 
 
 class ResourceBookingService:
@@ -9,9 +10,11 @@ class ResourceBookingService:
         self,
         resource_booking_repository: ResourceBookingRepository,
         integrity_score_repository: IntegrityScoreRepository,
+        notification_service: NotificationService,
     ) -> None:
         self.resource_booking_repository = resource_booking_repository
         self.integrity_score_repository = integrity_score_repository
+        self.notification_service = notification_service
 
     def create_booking(
         self,
@@ -36,10 +39,23 @@ class ResourceBookingService:
             )
             self.resource_booking_repository.commit()
 
+            resource_name = booking.resource.resource_name if booking.resource else f"资源 {booking.resource_id}"
+
+            payload = self.notification_service.build_resource_booking_confirmed_payload(
+                user_id=user_id,
+                booking_id=booking.id,
+                resource_name=resource_name,
+                start_time=booking.start_time.isoformat(),
+                end_time=booking.end_time.isoformat(),
+                check_in_deadline=booking.check_in_deadline.isoformat() if booking.check_in_deadline else None,
+            )
+            self.notification_service.create_notification_from_payload(payload=payload)
+
             return {
                 "success": True,
                 "booking_id": booking.id,
                 "resource_id": booking.resource_id,
+                "resource_name": resource_name,
                 "booking_type": booking.booking_type,
                 "start_time": booking.start_time.isoformat(),
                 "end_time": booking.end_time.isoformat(),
@@ -115,6 +131,7 @@ class ResourceBookingService:
 
         expired_count = 0
         integrity_penalty_count = 0
+        notification_count = 0
 
         for booking in bookings:
             self.resource_booking_repository.update_status(
@@ -133,6 +150,16 @@ class ResourceBookingService:
             )
             integrity_penalty_count += 1
 
+            resource_name = booking.resource.resource_name if booking.resource else f"资源 {booking.resource_id}"
+            payload = self.notification_service.build_no_show_notification_payload(
+                user_id=booking.user_id,
+                booking_id=booking.id,
+                resource_name=resource_name,
+                score_delta=-5,
+            )
+            self.notification_service.create_notification_from_payload(payload=payload)
+            notification_count += 1
+
         if bookings:
             self.resource_booking_repository.commit()
             self.integrity_score_repository.commit()
@@ -141,5 +168,6 @@ class ResourceBookingService:
             "success": True,
             "expired_count": expired_count,
             "integrity_penalty_count": integrity_penalty_count,
+            "notification_count": notification_count,
             "checked_at": current_time.isoformat(),
         }

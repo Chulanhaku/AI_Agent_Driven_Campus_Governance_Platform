@@ -40,6 +40,13 @@ from app.db.repositories.resource_booking_repository import ResourceBookingRepos
 from app.db.repositories.resource_repository import ResourceRepository
 from app.services.resource_booking_service import ResourceBookingService
 from app.services.resource_service import ResourceService
+from app.db.repositories.notification_repository import NotificationRepository
+from app.services.notification_service import NotificationService
+from app.db.repositories.approval_request_repository import ApprovalRequestRepository
+from app.db.repositories.approval_template_repository import ApprovalTemplateRepository
+from app.services.zero_form_approval_service import ZeroFormApprovalService
+from app.db.repositories.user_repository import UserRepository
+
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -66,6 +73,8 @@ def get_agent_session_service(
     resource_repository = ResourceRepository(db)
     resource_booking_repository = ResourceBookingRepository(db)
     integrity_score_repository = IntegrityScoreRepository(db)
+    approval_request_repository = ApprovalRequestRepository(db)
+    approval_template_repository = ApprovalTemplateRepository(db)
 
     schedule_service = ScheduleService(schedule_repository)
     campus_card_service = CampusCardService(campus_card_repository)
@@ -84,9 +93,18 @@ def get_agent_session_service(
         course_enrollment_repository=course_enrollment_repository,
     )
     resource_service = ResourceService(resource_repository)
+
+    notification_repository = NotificationRepository(db)
+    notification_service = NotificationService(notification_repository)
     resource_booking_service = ResourceBookingService(
         resource_booking_repository=resource_booking_repository,
         integrity_score_repository=integrity_score_repository,
+        notification_service=notification_service,
+    )
+    zero_form_approval_service = ZeroFormApprovalService(
+        approval_template_repository=approval_template_repository,
+        approval_request_repository=approval_request_repository,
+        user_repository=UserRepository(db),
     )
 
     return AgentSessionService(
@@ -105,6 +123,7 @@ def get_agent_session_service(
         course_enrollment_service=course_enrollment_service,
         resource_service=resource_service,
         resource_booking_service=resource_booking_service,
+        zero_form_approval_service=zero_form_approval_service,
     )
 
 def get_tool_execution_log_service(

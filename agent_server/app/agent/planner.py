@@ -199,6 +199,42 @@ class Planner:
                     }
                 ],
             }
+        
+        if intent == "zero_form_approval_generate":
+            return {
+                "plan_type": "multi_step",
+                "steps": [
+                    {
+                        "type": "call_tool",
+                        "tool_name": "generate_zero_form_approval",
+                        "params": {
+                            "current_user_id": context["current_user_obj"].id,
+                            "approval_type": context.get("approval_type"),
+                            "parsed_fields": {
+                                "reason": context.get("approval_reason"),
+                                "start_date": context.get("approval_start_date"),
+                                "end_date": context.get("approval_end_date"),
+                            },
+                        },
+                    },
+                    {
+                        "type": "compose",
+                    },
+                ],
+            }
+
+        if intent == "zero_form_approval_submit":
+            return {
+                "plan_type": "workflow",
+                "steps": [
+                    {
+                        "type": "create_pending_zero_form_approval_submit",
+                        "params": {
+                            "session_id": context["session_id"],
+                        },
+                    }
+                ],
+            }
         return {
             "plan_type": "fallback",
             "steps": [

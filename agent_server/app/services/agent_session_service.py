@@ -36,6 +36,11 @@ from app.services.resource_service import ResourceService
 from app.tools.resource_booking_tools import QueryAvailableResourcesTool, SubmitResourceBookingTool
 from app.workflows.resource_booking_workflow import ResourceBookingWorkflow
 from app.utils.semester_utils import SemesterUtils
+from app.services.zero_form_approval_service import ZeroFormApprovalService
+from app.tools.zero_form_approval_tools import GenerateZeroFormApprovalTool, SubmitZeroFormApprovalTool
+from app.workflows.zero_form_approval_workflow import ZeroFormApprovalWorkflow
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +63,7 @@ class AgentSessionService:
         course_enrollment_service: CourseEnrollmentService,
         resource_service: ResourceService,
         resource_booking_service: ResourceBookingService,
+        zero_form_approval_service: ZeroFormApprovalService,
     ) -> None:
         self.agent_session_repository = agent_session_repository
         self.pending_action_repository = pending_action_repository
@@ -88,6 +94,8 @@ class AgentSessionService:
 
         self.resource_service = resource_service
         self.resource_booking_service = resource_booking_service
+
+        self.zero_form_approval_service = zero_form_approval_service
 
     def get_user_session(self, session_id: int, user_id: int) -> AgentSession | None:
         return self.agent_session_repository.get_session_by_id_and_user_id(
@@ -463,6 +471,65 @@ class AgentSessionService:
                         "result": result,
                     },
                 )
+            elif action.action_type == "zero_form_approval_submit":
+                approval_type = str(action.payload_json["approval_type"])
+                template_id = int(action.payload_json["template_id"])
+                approver_user_id = action.payload_json.get("approver_user_id")
+                form_data = dict(action.payload_json["form_data"])
+
+                tool = SubmitZeroFormApprovalTool(self.zero_form_approval_service)
+
+                tool_log = self.tool_execution_log_service.start_log(
+                    session_id=session.id,
+                    tool_name=tool.name,
+                    input_json={
+                        "current_user_id": current_user.id,
+                        "approval_type": approval_type,
+                        "template_id": template_id,
+                        "approver_user_id": approver_user_id,
+                        "form_data": form_data,
+                    },
+                )
+
+                try:
+                    result = tool.run(
+                        current_user=current_user,
+                        approval_type=approval_type,
+                        template_id=template_id,
+                        approver_user_id=approver_user_id,
+                        form_data=form_data,
+                    )
+                    self.tool_execution_log_service.finish_log(
+                        log=tool_log,
+                        output_json=result,
+                        status="success",
+                    )
+                except Exception as exc:
+                    self.tool_execution_log_service.finish_log(
+                        log=tool_log,
+                        output_json={"error": str(exc)},
+                        status="failed",
+                    )
+                    raise
+
+                self.pending_action_repository.update_status(action=action, status="approved")
+
+                assistant_text = self.response_formatter.format(
+                    intent="zero_form_approval_submit",
+                    result=result,
+                )
+
+                self.audit_service.record(
+                    user_id=current_user.id,
+                    action="zero_form_approval.submit",
+                    target_type="pending_action",
+                    target_id=action.id,
+                    detail_json={
+                        "approval_type": approval_type,
+                        "session_id": session.id,
+                        "result": result,
+                    },
+                )
             else:
                 raise ValueError(f"Unsupported action type: {action.action_type}")
 
@@ -492,12 +559,17 @@ class AgentSessionService:
         rag_tool = QueryPolicyKnowledgeTool(self.retriever, top_k=self.rag_top_k)
         course_plan_tool = GenerateCoursePlanTool(self.course_plan_service)
         resource_query_tool = QueryAvailableResourcesTool(self.resource_service)
+        zero_form_generate_tool = GenerateZeroFormApprovalTool(self.zero_form_approval_service)
+        zero_form_submit_tool = SubmitZeroFormApprovalTool(self.zero_form_approval_service)
 
+
+        tool_registry.register(zero_form_generate_tool)
         tool_registry.register(schedule_tool)
         tool_registry.register(balance_tool)
         tool_registry.register(rag_tool)
         tool_registry.register(course_plan_tool)
         tool_registry.register(resource_query_tool)
+        tool_registry.register(zero_form_submit_tool)
 
         persisted_memory_obj = self.agent_memory_service.get_session_memory(session_id)
         persisted_memory = None
@@ -557,6 +629,12 @@ class AgentSessionService:
         parsed_booking_start_time = parsed_slots.get("booking_start_time")
         parsed_booking_end_time = parsed_slots.get("booking_end_time")
 
+        approval_type = parsed_slots.get("approval_type")
+        approval_reason = parsed_slots.get("approval_reason")
+        approval_start_date = parsed_slots.get("start_date")
+        approval_end_date = parsed_slots.get("end_date")
+
+
         slot_memory = memory_context.get("slot_memory", {})
 
         memory_semester = slot_memory.get("semester")
@@ -591,6 +669,13 @@ class AgentSessionService:
             selected_plan_index_from_parse
             or course_plan_memory.get("selected_plan_index")
         )
+
+        zero_form_memory = slot_memory.get("zero_form_approval", {})
+        resolved_approval_type = approval_type or zero_form_memory.get("approval_type")
+        resolved_approval_reason = approval_reason or zero_form_memory.get("approval_reason")
+        resolved_approval_start_date = approval_start_date or zero_form_memory.get("start_date")
+        resolved_approval_end_date = approval_end_date or zero_form_memory.get("end_date")
+
 
         self.audit_service.record(
             user_id=current_user.id,
@@ -704,6 +789,7 @@ class AgentSessionService:
             current_intent=memory_context.get("current_intent"),
             slot_snapshot_json=memory_context.get("slot_memory"),
         )
+        context["current_user_obj"] = current_user
         context["session_id"] = session_id
         context["amount"] = amount
         context["leave_days"] = leave_days
@@ -714,6 +800,11 @@ class AgentSessionService:
         context["booking_end_time"] = parsed_booking_end_time
         context["selected_resource_index"] = resolved_selected_resource_index
         context["selected_plan_index"] = resolved_selected_plan_index
+        context["approval_type"] = resolved_approval_type
+        context["approval_reason"] = resolved_approval_reason
+        context["approval_start_date"] = resolved_approval_start_date
+        context["approval_end_date"] = resolved_approval_end_date
+
         print("service line 515 context:", context)
         #
         #3/23 /changed  / not sure if need to save to context
@@ -938,7 +1029,49 @@ class AgentSessionService:
                 },
             )
             return response_text, True, pending_action.id
+        
+        if first_step_type == "create_pending_zero_form_approval_submit":
+            zero_form_memory = memory_context.get("slot_memory", {}).get("zero_form_approval", {})
+            last_form_draft = zero_form_memory.get("last_form_draft")
 
+            if not last_form_draft or not last_form_draft.get("success"):
+                return "当前会话中还没有可提交的审批草稿，请先让我为你生成审批表单。", False, None
+
+            if last_form_draft.get("missing_fields"):
+                return f"当前审批草稿仍缺少字段：{', '.join(last_form_draft['missing_fields'])}，请先补充后再提交。", False, None
+
+            workflow = ZeroFormApprovalWorkflow(self.pending_action_repository)
+            pending_action = workflow.create_pending_submit(
+                current_user=current_user,
+                session_id=session_id,
+                approval_type=last_form_draft["approval_type"],
+                template_id=last_form_draft["template_id"],
+                approver_user_id=last_form_draft.get("approver_user_id"),
+                form_data=last_form_draft["form_data"],
+            )
+
+            self.audit_service.record(
+                user_id=current_user.id,
+                action="pending_action.create",
+                target_type="pending_action",
+                target_id=pending_action.id,
+                detail_json={
+                    "action_type": "zero_form_approval_submit",
+                    "approval_type": last_form_draft["approval_type"],
+                    "session_id": session_id,
+                },
+            )
+
+            response_text = self.response_formatter.format(
+                intent="zero_form_approval_submit",
+                result={
+                    "requires_confirmation": True,
+                    "approval_type": last_form_draft["approval_type"],
+                    "action_id": pending_action.id,
+                },
+            )
+            return response_text, True, pending_action.id
+        
         print("Generated plan:", plan)
 
 
@@ -1116,6 +1249,51 @@ class AgentSessionService:
                 memory_summary=memory_context.get("summary_text"),
             )
             return final_reply, False, None
+        
+        if intent == "zero_form_approval_generate":
+            self.audit_service.record(
+                user_id=current_user.id,
+                action="zero_form_approval.generate",
+                target_type="agent_session",
+                target_id=session_id,
+                detail_json={
+                    "message": user_message,
+                    "approval_type": resolved_approval_type,
+                },
+            )
+
+            tool_result_summary = self._build_tool_result_summary(
+                primary_intent=intent,
+                execution_result=execution_result,
+            )
+
+            approval_result = execution_result.get("tool_results", {}).get("generate_zero_form_approval", {})
+            updated_slot_snapshot = memory_context.get("slot_memory", {}).copy()
+            updated_slot_snapshot["zero_form_approval"] = {
+                "approval_type": resolved_approval_type,
+                "approval_reason": resolved_approval_reason,
+                "start_date": resolved_approval_start_date,
+                "end_date": resolved_approval_end_date,
+                "last_form_draft": approval_result,
+            }
+
+            self.agent_memory_service.save_memory_snapshot(
+                session_id=session_id,
+                summary_text=memory_context.get("summary_text"),
+                current_intent="zero_form_approval_generate",
+                slot_snapshot_json=updated_slot_snapshot,
+            )
+
+            final_reply = self.response_composer.compose(
+                user_name=current_user.full_name,
+                user_message=user_message,
+                primary_intent=intent,
+                secondary_intents=secondary_intents,
+                tool_result_summary=tool_result_summary,
+                reasoning_result_summary=None,
+                memory_summary=memory_context.get("summary_text"),
+            )
+            return final_reply, False, None
         return self.response_formatter.format(intent=intent, result=execution_result), False, None
 
     # old query
@@ -1259,7 +1437,7 @@ class AgentSessionService:
             if step_type == "call_tool":
                 tool_name = step["tool_name"]
                 params = step.get("params", {})
-
+                
                 tool_log = self.tool_execution_log_service.start_log(
                     session_id=session_id,
                     tool_name=tool_name,
@@ -1414,6 +1592,12 @@ class AgentSessionService:
             return self.response_formatter.format(
                 intent="resource_booking_generate",
                 result=resource_result,
+            )
+        if primary_intent == "zero_form_approval_generate":
+            approval_result = tool_results.get("generate_zero_form_approval", {})
+            return self.response_formatter.format(
+                intent="zero_form_approval_generate",
+                result=approval_result,
             )
         return "已完成相关工具调用。"
 

@@ -135,6 +135,28 @@ class MemoryManager:
                     or persisted_slot_memory.get("resource_booking", {}).get("selected_resource_index")
                 ),
             },
+            "zero_form_approval": {
+                "approval_type": (
+                    runtime_slot_memory.get("zero_form_approval", {}).get("approval_type")
+                    or persisted_slot_memory.get("zero_form_approval", {}).get("approval_type")
+                ),
+                "approval_reason": (
+                    runtime_slot_memory.get("zero_form_approval", {}).get("approval_reason")
+                    or persisted_slot_memory.get("zero_form_approval", {}).get("approval_reason")
+                ),
+                "start_date": (
+                    runtime_slot_memory.get("zero_form_approval", {}).get("start_date")
+                    or persisted_slot_memory.get("zero_form_approval", {}).get("start_date")
+                ),
+                "end_date": (
+                    runtime_slot_memory.get("zero_form_approval", {}).get("end_date")
+                    or persisted_slot_memory.get("zero_form_approval", {}).get("end_date")
+                ),
+                "last_form_draft": (
+                    runtime_slot_memory.get("zero_form_approval", {}).get("last_form_draft")
+                    or persisted_slot_memory.get("zero_form_approval", {}).get("last_form_draft")
+                ),
+            },
         }
         return merged
 
@@ -200,6 +222,13 @@ class MemoryManager:
                 "last_candidates": [],
                 "selected_resource_index": None,
                 "pending_booking": {},
+            },
+            "zero_form_approval": {
+                "approval_type": None,
+                "approval_reason": None,
+                "start_date": None,
+                "end_date": None,
+                "last_form_draft": None,
             },
         }
 

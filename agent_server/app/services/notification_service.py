@@ -39,6 +39,20 @@ class NotificationService:
             self.notification_repository.rollback()
             raise
 
+    def create_notification_from_payload(
+        self,
+        *,
+        payload: dict,
+    ) -> dict:
+        return self.create_notification(
+            user_id=payload["user_id"],
+            title=payload["title"],
+            content=payload["content"],
+            notification_type=payload["notification_type"],
+            related_type=payload.get("related_type"),
+            related_id=payload.get("related_id"),
+        )
+
     def list_my_notifications(
         self,
         *,
@@ -93,6 +107,29 @@ class NotificationService:
         except Exception:
             self.notification_repository.rollback()
             raise
+
+    def build_resource_booking_confirmed_payload(
+        self,
+        *,
+        user_id: int,
+        booking_id: int,
+        resource_name: str,
+        start_time: str,
+        end_time: str,
+        check_in_deadline: str | None,
+    ) -> dict:
+        return {
+            "user_id": user_id,
+            "title": "资源预约成功",
+            "content": (
+                f"你已成功预约资源：{resource_name}。"
+                f"预约单号：{booking_id}；开始时间：{start_time}；结束时间：{end_time}。"
+                f"{'签到截止：' + check_in_deadline + '。' if check_in_deadline else ''}"
+            ),
+            "notification_type": "resource_booking_confirmed",
+            "related_type": "resource_booking",
+            "related_id": booking_id,
+        }
 
     def build_no_show_notification_payload(
         self,

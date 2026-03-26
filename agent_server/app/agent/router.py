@@ -129,6 +129,8 @@ class AgentRouter:
                     "course_plan_submit",
                     "resource_booking_generate",
                     "resource_booking_submit",
+                    "zero_form_approval_generate",
+                    "zero_form_approval_submit",
                 }:
                     return intent
             except Exception:
@@ -241,6 +243,31 @@ class AgentRouter:
             "帮我预约",
             "我要预约",
         ]
+
+        zero_form_submit_keywords = [
+            "提交审批",
+            "确认提交审批",
+            "提交这个申请",
+            "就按这个提交",
+        ]
+        for keyword in zero_form_submit_keywords:
+            if keyword in normalized:
+                return "zero_form_approval_submit"
+
+        zero_form_generate_keywords = [
+            "帮我申请",
+            "帮我提交申请",
+            "帮我填申请",
+            "我想申请",
+            "我要申请",
+            "开证明",
+            "外出申请",
+            "请假申请",
+        ]
+        for keyword in zero_form_generate_keywords:
+            if keyword in normalized:
+                return "zero_form_approval_generate"
+
         for keyword in resource_booking_keywords:
             if keyword in normalized:
                 return "resource_booking_generate"
