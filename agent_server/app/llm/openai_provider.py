@@ -76,7 +76,7 @@ class OpenAiProvider(BaseLlmProvider):
 3. 如果用户是多意图表达，要尽量识别 secondary_intents
 4. 如果用户只是在选择之前的方案或资源，也要识别 submit 类 intent,并且submit 类 intent 的优先级要高于 generate 类 intent
 5. 如果用户是在发起审批申请，例如“帮我申请外出”“帮我开在读证明”“我要请假申请”等类似的语言，primary_intent 应为 zero_form_approval_generate。如果用户是在确认提交已经生成好的审批草稿，primary_intent 应为 zero_form_approval_submit。
-
+6. 所有index都是1为基底的
 会话摘要：
 {memory_summary or "无"}
 
@@ -97,6 +97,10 @@ class OpenAiProvider(BaseLlmProvider):
     "booking_end_time": "2026-03-24T16:00:00",
     "selected_plan_index": null,
     "selected_resource_index": null
+    "approval_type": certificate_request,
+    "approval_reason": null,
+    "start_date": null,
+    "end_date": null
   }}
 }}
 """.strip()
@@ -184,6 +188,12 @@ class OpenAiProvider(BaseLlmProvider):
 - selected_resource_index: 整数，一般用户会直接第几套就是几，无法提取则为 null
 - booking_start_time: ISO 8601 字符串或 null
 - booking_end_time: ISO 8601 字符串或 null
+
+如果 intent == zero_form_approval_generate，请提取:
+- approval_type: leave_application / outing_application / certificate_request / null
+- reason: 字符串，无法提取则为 null
+- start_date: YYYY-MM-DD 或 null
+- end_date: YYYY-MM-DD 或 null
 
 如果 intent == query_schedule 或 policy_qa 或 course_plan_generate，可返回空对象。
 
