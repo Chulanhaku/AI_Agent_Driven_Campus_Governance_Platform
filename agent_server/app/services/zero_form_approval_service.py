@@ -2,6 +2,7 @@ from app.db.models import User
 from app.db.repositories.approval_request_repository import ApprovalRequestRepository
 from app.db.repositories.approval_template_repository import ApprovalTemplateRepository
 from app.db.repositories.user_repository import UserRepository
+from app.services.notification_service import NotificationService
 
 
 class ZeroFormApprovalService:
@@ -10,10 +11,12 @@ class ZeroFormApprovalService:
         approval_template_repository: ApprovalTemplateRepository,
         approval_request_repository: ApprovalRequestRepository,
         user_repository: UserRepository,
+        notification_service: NotificationService,
     ) -> None:
         self.approval_template_repository = approval_template_repository
         self.approval_request_repository = approval_request_repository
         self.user_repository = user_repository
+        self.notification_service = notification_service
 
     def build_form_draft(
         self,
@@ -83,6 +86,15 @@ class ZeroFormApprovalService:
             )
             self.approval_request_repository.commit()
 
+            if approver_user_id is not None:
+                payload = self.notification_service.build_zero_form_submitted_to_approver_payload(
+                    approver_user_id=approver_user_id,
+                    request_id=item.id,
+                    approval_type=approval_type,
+                    applicant_name=current_user.full_name,
+                )
+                self.notification_service.create_notification_from_payload(payload=payload)
+
             return {
                 "success": True,
                 "request_id": item.id,
@@ -94,10 +106,116 @@ class ZeroFormApprovalService:
             self.approval_request_repository.rollback()
             raise
 
+    def list_pending_for_approver(
+        self,
+        *,
+        approver_user_id: int,
+        limit: int = 20,
+    ) -> list[dict]:
+        items = self.approval_request_repository.list_by_approver_user_id(
+            approver_user_id=approver_user_id,
+            status="pending",
+            limit=limit,
+        )
+        return [
+            {
+                "id": item.id,
+                "approval_type": item.approval_type,
+                "template_name": item.template.template_name if item.template else None,
+                "form_data": item.form_data_json,
+                "status": item.status,
+                "user_id": item.user_id,
+                "approver_user_id": item.approver_user_id,
+                "created_at": item.created_at.isoformat() if item.created_at else None,
+            }
+            for item in items
+        ]
+
+    def approve_request(
+        self,
+        *,
+        request_id: int,
+        approver_user_id: int,
+    ) -> dict:
+        item = self.approval_request_repository.get_by_id_and_approver_user_id(
+            request_id=request_id,
+            approver_user_id=approver_user_id,
+        )
+        if item is None:
+            raise ValueError("Approval request not found")
+
+        if item.status != "pending":
+            raise ValueError("Approval request is not pending")
+
+        try:
+            self.approval_request_repository.update_status(
+                item=item,
+                status="approved",
+            )
+            self.approval_request_repository.commit()
+
+            payload = self.notification_service.build_zero_form_result_to_applicant_payload(
+                applicant_user_id=item.user_id,
+                request_id=item.id,
+                approval_type=item.approval_type,
+                status="approved",
+            )
+            self.notification_service.create_notification_from_payload(payload=payload)
+
+            return {
+                "success": True,
+                "request_id": item.id,
+                "approval_type": item.approval_type,
+                "status": item.status,
+            }
+        except Exception:
+            self.approval_request_repository.rollback()
+            raise
+
+    def reject_request(
+        self,
+        *,
+        request_id: int,
+        approver_user_id: int,
+    ) -> dict:
+        item = self.approval_request_repository.get_by_id_and_approver_user_id(
+            request_id=request_id,
+            approver_user_id=approver_user_id,
+        )
+        if item is None:
+            raise ValueError("Approval request not found")
+
+        if item.status != "pending":
+            raise ValueError("Approval request is not pending")
+
+        try:
+            self.approval_request_repository.update_status(
+                item=item,
+                status="rejected",
+            )
+            self.approval_request_repository.commit()
+
+            payload = self.notification_service.build_zero_form_result_to_applicant_payload(
+                applicant_user_id=item.user_id,
+                request_id=item.id,
+                approval_type=item.approval_type,
+                status="rejected",
+            )
+            self.notification_service.create_notification_from_payload(payload=payload)
+
+            return {
+                "success": True,
+                "request_id": item.id,
+                "approval_type": item.approval_type,
+                "status": item.status,
+            }
+        except Exception:
+            self.approval_request_repository.rollback()
+            raise
+
     def _resolve_approver_by_role_code(
         self,
         *,
         role_code: str,
     ) -> User | None:
-        # 当前随便做做：在 user_repository 中找第一个 active 且角色匹配的人
         return self.user_repository.get_first_active_user_by_role_code(role_code=role_code)

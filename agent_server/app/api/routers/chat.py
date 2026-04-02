@@ -105,8 +105,8 @@ def get_agent_session_service(
         approval_template_repository=approval_template_repository,
         approval_request_repository=approval_request_repository,
         user_repository=UserRepository(db),
+        notification_service=notification_service,
     )
-
     return AgentSessionService(
         agent_session_repository=agent_session_repository,
         agent_memory_service=agent_memory_service,          

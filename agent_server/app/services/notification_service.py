@@ -150,3 +150,44 @@ class NotificationService:
             "related_type": "resource_booking",
             "related_id": booking_id,
         }
+        
+    def build_zero_form_submitted_to_approver_payload(
+        self,
+        *,
+        approver_user_id: int,
+        request_id: int,
+        approval_type: str,
+        applicant_name: str,
+    ) -> dict:
+        return {
+            "user_id": approver_user_id,
+            "title": "新的审批申请待处理",
+            "content": (
+                f"{applicant_name} 提交了一条 {approval_type} 审批申请，"
+                f"审批单号：{request_id}，请及时处理。"
+            ),
+            "notification_type": "zero_form_approval_pending",
+            "related_type": "zero_form_approval_request",
+            "related_id": request_id,
+        }
+
+    def build_zero_form_result_to_applicant_payload(
+        self,
+        *,
+        applicant_user_id: int,
+        request_id: int,
+        approval_type: str,
+        status: str,
+    ) -> dict:
+        status_text = "已通过" if status == "approved" else "已驳回"
+        return {
+            "user_id": applicant_user_id,
+            "title": "审批结果通知",
+            "content": (
+                f"你的 {approval_type} 审批申请已处理，"
+                f"审批单号：{request_id}，当前结果：{status_text}。"
+            ),
+            "notification_type": "zero_form_approval_result",
+            "related_type": "zero_form_approval_request",
+            "related_id": request_id,
+        }
