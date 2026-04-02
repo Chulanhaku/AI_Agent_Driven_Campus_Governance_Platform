@@ -5,8 +5,14 @@ from app.utils.semester_utils import SemesterUtils
 from datetime import datetime, timedelta
 
 class AgentRouter:
-    def __init__(self, llm_provider: BaseLlmProvider | None = None) -> None:
+    def __init__(
+        self,
+        llm_provider: BaseLlmProvider | None = None,
+        capability_registry=None,
+    ) -> None:
         self.llm_provider = llm_provider
+        self.capability_registry = capability_registry
+
 
     # def detect_intent(self, message: str) -> str:
     #     rule_intent = self._detect_intent_by_rules(message)
@@ -104,6 +110,11 @@ class AgentRouter:
         message: str,
         memory_context: dict | None = None,
     ) -> str:
+        if self.capability_registry is not None:
+            aliased_intent = self.capability_registry.resolve_intent_alias(message=message)
+            if aliased_intent:
+                return aliased_intent
+
         rule_intent = self._detect_intent_by_rules(
             message=message,
             memory_context=memory_context,
@@ -144,6 +155,7 @@ class AgentRouter:
         message: str,
         memory_context: dict | None = None,
     ) -> str:
+        return "fallback"
         normalized = message.strip().lower()
 
         policy_keywords = [
@@ -303,6 +315,7 @@ class AgentRouter:
 
         for keyword in schedule_keywords:
             if keyword in normalized:
+                print("rule matched query_schedule")
                 return "query_schedule"
 
         return "fallback"

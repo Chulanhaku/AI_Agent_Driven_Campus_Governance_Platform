@@ -77,6 +77,9 @@ class OpenAiProvider(BaseLlmProvider):
 4. 如果用户只是在选择之前的方案或资源，也要识别 submit 类 intent,并且submit 类 intent 的优先级要高于 generate 类 intent
 5. 如果用户是在发起审批申请，例如“帮我申请外出”“帮我开在读证明”“我要请假申请”等类似的语言，primary_intent 应为 zero_form_approval_generate。如果用户是在确认提交已经生成好的审批草稿，primary_intent 应为 zero_form_approval_submit。
 6. 所有index都是1为基底的
+7. 如果用户的要求很明显是可以正常支持的intent,不在目前支持的primary_intent范围内，primary_intent 应为 fallback  //以方便生成新的能力提案
+8. query_schedule 是专属于课表查询的，其他时刻表不能使用query_schedule
+
 会话摘要：
 {memory_summary or "无"}
 
@@ -96,8 +99,8 @@ class OpenAiProvider(BaseLlmProvider):
     "booking_start_time": "2026-03-24T14:00:00",
     "booking_end_time": "2026-03-24T16:00:00",
     "selected_plan_index": null,
-    "selected_resource_index": null
-    "approval_type": certificate_request,
+    "selected_resource_index": null,
+    "approval_type": "certificate_request",
     "approval_reason": null,
     "start_date": null,
     "end_date": null
@@ -437,6 +440,70 @@ class OpenAiProvider(BaseLlmProvider):
       "type": "compose"
     }}
   ]
+}}
+""".strip()
+
+        content = self._chat(prompt)
+        return self.output_parser.parse_json(content)
+    
+    
+    
+    
+    def generate_capability_proposal(
+        self,
+        *,
+        user_message: str,
+        research_summary: dict,
+        memory_summary: str | None,
+    ) -> dict:
+        prompt = f"""
+你是一个校园事务 Agent 的能力设计器。
+当前系统在处理用户请求时进入了 fallback，现在需要生成一条“能力提案”。
+
+请只输出 JSON，不要输出任何额外文字。
+
+目标：
+根据用户消息、会话摘要、已有 research 信息，设计一条可执行的能力提案。
+提案类型仅允许：
+- knowledge_patch
+- plan_patch
+- tool_spec
+
+要求：
+1. 如果只是已有能力的表达方式扩展，优先输出 knowledge_patch
+2. 如果可以基于现有工具和 planner 扩展实现，输出 plan_patch
+3. 如果确实需要新工具，输出 tool_spec
+4. 不要编造数据库表名
+5. 不要输出 Python 代码，只输出结构化提案
+6. capability_name 使用 snake_case
+
+用户消息：
+{user_message}
+
+会话摘要：
+{memory_summary or "无"}
+
+research_summary：
+{research_summary}
+
+输出示例：
+{{
+  "proposal_type": "tool_spec",
+  "capability_name": "query_shuttle_schedule",
+  "needs_new_tool": true,
+  "intent_aliases": ["校车时刻表", "班车时间"],
+  "planner_patch": null,
+  "tool_spec": {{
+    "name": "query_shuttle_schedule",
+    "description": "查询校车时刻表",
+    "inputs": {{
+      "campus": "string|null",
+      "date": "string|null"
+    }},
+    "read_only": true,
+    "data_sources": ["web_research", "db_search"]
+  }},
+  "reason": "用户需要查询校车时刻表，当前系统缺少该能力"
 }}
 """.strip()
 

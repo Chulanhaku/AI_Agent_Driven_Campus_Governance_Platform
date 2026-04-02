@@ -14,6 +14,7 @@ from app.llm.openai_embeddings_provider import OpenAiEmbeddingsProvider
 from app.llm.openai_provider import OpenAiProvider
 from app.rag.rag_service import RagService
 from database.seeds.seed_policy_handbook import seed_policy_handbook
+from app.self_iteration.capability_registry import CapabilityRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +82,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     llm_provider = build_llm_provider()
     embeddings_provider = build_embeddings_provider()
-
+    capability_registry = CapabilityRegistry()
     rag_service = RagService(
         embeddings_provider=embeddings_provider,
     )
@@ -95,9 +96,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         llm_provider=llm_provider,
         embeddings_provider=embeddings_provider,
         rag_service=rag_service,
+        capability_registry=capability_registry,
     )
 
     logger.info("application container initialized")
     yield
 
-    logger.info("application shutting down...")
+    logger.info("application shutting down...")

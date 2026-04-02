@@ -39,8 +39,8 @@ from app.utils.semester_utils import SemesterUtils
 from app.services.zero_form_approval_service import ZeroFormApprovalService
 from app.tools.zero_form_approval_tools import GenerateZeroFormApprovalTool, SubmitZeroFormApprovalTool
 from app.workflows.zero_form_approval_workflow import ZeroFormApprovalWorkflow
-
-
+from app.self_iteration.capability_service import CapabilityService
+from app.self_iteration.capability_registry import CapabilityRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +64,8 @@ class AgentSessionService:
         resource_service: ResourceService,
         resource_booking_service: ResourceBookingService,
         zero_form_approval_service: ZeroFormApprovalService,
+        capability_service: CapabilityService,
+        capability_registry: CapabilityRegistry,
     ) -> None:
         self.agent_session_repository = agent_session_repository
         self.pending_action_repository = pending_action_repository
@@ -76,9 +78,21 @@ class AgentSessionService:
         self.retriever = retriever
         self.rag_top_k = rag_top_k
 
-        self.router = AgentRouter(llm_provider=llm_provider)
+#
+        self.capability_registry = capability_registry
+        self.router = AgentRouter(
+            llm_provider=llm_provider,
+            capability_registry=capability_registry,
+        )
+        self.planner = Planner(
+            llm_provider=llm_provider,
+            capability_registry=capability_registry,
+        )
+
+#
+        #self.router = AgentRouter(llm_provider=llm_provider)
         self.context_builder = ContextBuilder()
-        self.planner = Planner(llm_provider=llm_provider)
+        #self.planner = Planner(llm_provider=llm_provider)
         self.executor = Executor()
         self.response_formatter = ResponseFormatter()
         self.prompt_manager = PromptManager()
@@ -96,6 +110,8 @@ class AgentSessionService:
         self.resource_booking_service = resource_booking_service
 
         self.zero_form_approval_service = zero_form_approval_service
+        
+        self.capability_service = capability_service
 
     def get_user_session(self, session_id: int, user_id: int) -> AgentSession | None:
         return self.agent_session_repository.get_session_by_id_and_user_id(
@@ -860,6 +876,8 @@ class AgentSessionService:
             },
         )
 
+        print("llm generator",parsed_request)
+        
         if intent == "fallback":
             pending_intent = slot_memory.get("pending_intent")
             if pending_intent in {
@@ -1325,8 +1343,10 @@ class AgentSessionService:
                 user_name=current_user.full_name,
                 user_message=user_message,
                 memory_context=memory_context,
+                session_id=session_id,
+                user_id=current_user.id,
             ), False, None
-
+            
         if not execution_result.get("success"):
             return "我识别到了你的业务请求，但执行过程中出了点问题。后面我们会补上更完整的错误处理。", False, None
         
@@ -1766,9 +1786,31 @@ class AgentSessionService:
         user_name: str,
         user_message: str,
         memory_context: dict | None = None,
+        session_id: int | None = None,
+        user_id: int | None = None,
     ) -> str:
+        print("in fallback")
         recent_messages = memory_context.get("recent_messages", []) if memory_context else []
         summary_text = memory_context.get("summary_text", "") if memory_context else ""
+
+        proposal_result = self.capability_service.try_propose_from_fallback(
+            session_id=session_id,
+            user_id=user_id,
+            user_message=user_message,
+            memory_summary=summary_text,
+        )
+
+        if proposal_result is not None and proposal_result.get("success"):
+            capability_name = proposal_result.get("capability_name")
+            proposal_type = proposal_result.get("proposal_type")
+            proposal_id = proposal_result.get("proposal_id")
+
+            return (
+                f"你好，{user_name}。当前这项需求还没有现成能力可以直接处理。"
+                f"不过我已经为这条请求生成了一条能力提案，"
+                f"提案名称：{capability_name}，类型：{proposal_type}，提案编号：{proposal_id}。"
+                "后续可以基于这条提案继续补充规则、计划或新工具。"
+            )
 
         memory_text = ""
         if recent_messages:

@@ -1,10 +1,16 @@
+from app.self_iteration.capability_registry import CapabilityRegistry
 from app.agent.plan_schema import ExecutionPlanSchema
 from app.llm.base import BaseLlmProvider
 
 
 class Planner:
-    def __init__(self, llm_provider: BaseLlmProvider | None = None) -> None:
+    def __init__(
+        self,
+        llm_provider: BaseLlmProvider | None = None,
+        capability_registry: CapabilityRegistry | None = None,
+    ) -> None:
         self.llm_provider = llm_provider
+        self.capability_registry = capability_registry
 
     def build_plan(
         self,
@@ -13,6 +19,15 @@ class Planner:
         context: dict,
         use_llm_planner: bool = False,
     ) -> dict:
+        if self.capability_registry is not None:
+            patched = self.capability_registry.get_plan_patch_for_intent(
+                primary_intent=intent,
+            )
+            if patched is not None:
+                return {
+                    "plan_type": "multi_step",
+                    "steps": patched.get("steps", []),
+                }
         if use_llm_planner and self.llm_provider is not None:
             llm_plan = self._build_plan_by_llm(intent=intent, context=context)
             if llm_plan is not None:

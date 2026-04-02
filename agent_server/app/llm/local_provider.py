@@ -100,3 +100,29 @@ class LocalLlmProvider(BaseLlmProvider):
                 }
             ],
         }
+        
+    def generate_capability_proposal(
+        self,
+        *,
+        user_message: str,
+        research_summary: dict,
+        memory_summary: str | None,
+    ) -> dict:
+        normalized = user_message.strip().lower()
+
+        capability_name = "unknown_capability"
+        if "校车" in normalized or "班车" in normalized:
+            capability_name = "query_shuttle_schedule"
+        elif "羽毛球馆" in normalized:
+            capability_name = "book_badminton_court"
+        elif "成绩单" in normalized:
+            capability_name = "export_transcript"
+
+        return {
+            "proposal_type": "tool_spec",
+            "capability_name": capability_name,
+            "needs_new_tool": True,
+            "intent_aliases": [],
+            "reason": "local/mock provider generated fallback capability proposal",
+            "research_summary": research_summary,
+        }

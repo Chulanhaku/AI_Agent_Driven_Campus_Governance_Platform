@@ -75,3 +75,13 @@ class BaseLlmProvider(ABC):
         memory_summary: str | None,
     ) -> dict:
         raise NotImplementedError
+    
+    @abstractmethod
+    def generate_capability_proposal(
+        self,
+        *,
+        user_message: str,
+        research_summary: dict,
+        memory_summary: str | None,
+    ) -> dict:
+        raise NotImplementedError
