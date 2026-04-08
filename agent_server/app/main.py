@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-
+from fastapi.middleware.cors import CORSMiddleware
 from app.lifecycle import lifespan
 from app.config.settings import get_settings
 from app.config.logging import setup_logging
@@ -28,3 +28,14 @@ app.include_router(resource_booking.router, prefix=API_PREFIX)
 app.include_router(notification.router, prefix=API_PREFIX)
 app.include_router(approval.router, prefix=API_PREFIX)
 app.include_router(capability.router, prefix=API_PREFIX)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)

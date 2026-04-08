@@ -6,18 +6,33 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+
 
 find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets Network)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Network)
 
 set(PROJECT_SOURCES
         main.cpp
-
-
-
 )
+set(creeper_qt_root
+    "${CMAKE_CURRENT_SOURCE_DIR}/lib/dir/creeper-qt"
+)
+
+file(GLOB_RECURSE creeper_qt_sources
+    "${creeper_qt_root}/*.cc"
+    "${creeper_qt_root}/*.cpp"
+)
+
+file(GLOB_RECURSE creeper_qt_headers
+    "${creeper_qt_root}/*.hh"
+    "${creeper_qt_root}/*.hpp"
+    "${creeper_qt_root}/*.h"
+)
+get_filename_component(creeper_qt_parent "${creeper_qt_root}" DIRECTORY)
 
 if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
     qt_add_executable(qt_client
@@ -39,7 +54,14 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
         core/auth/token_manager.h core/auth/token_manager.cpp
         core/utils/json_utils.h core/utils/json_utils.cpp
         core/network/sse_client.h core/network/sse_client.cpp
+        ui/theme/app_theme.h ui/theme/app_theme.cpp
+        ui/pages/dashboard_page.h ui/pages/dashboard_page.cpp
 
+
+
+
+        ${creeper_qt_sources}
+        ${creeper_qt_headers}
     )
 # Define target properties for Android with Qt 6 as:
 #    set_property(TARGET qt_client APPEND PROPERTY QT_ANDROID_PACKAGE_SOURCE_DIR
@@ -59,6 +81,13 @@ else()
     endif()
 endif()
 
+target_include_directories(qt_client PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${creeper_qt_parent}
+    ${creeper_qt_root}
+    "C:/msys64/mingw64/include"
+)
+target_compile_features(qt_client PRIVATE cxx_std_23)
 target_link_libraries(qt_client PRIVATE
     Qt${QT_VERSION_MAJOR}::Widgets
     Qt${QT_VERSION_MAJOR}::Network
