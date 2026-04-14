@@ -125,4 +125,6 @@ class LocalLlmProvider(BaseLlmProvider):
             "intent_aliases": [],
             "reason": "local/mock provider generated fallback capability proposal",
             "research_summary": research_summary,
+            "confidence_score": 0.55,
+            "risk_level": "medium",
         }

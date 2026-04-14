@@ -462,8 +462,6 @@ class OpenAiProvider(BaseLlmProvider):
 
 请只输出 JSON，不要输出任何额外文字。
 
-目标：
-根据用户消息、会话摘要、已有 research 信息，设计一条可执行的能力提案。
 提案类型仅允许：
 - knowledge_patch
 - plan_patch
@@ -476,6 +474,9 @@ class OpenAiProvider(BaseLlmProvider):
 4. 不要编造数据库表名
 5. 不要输出 Python 代码，只输出结构化提案
 6. capability_name 使用 snake_case
+7. 额外输出：
+   - confidence_score: 0~1 之间的小数
+   - risk_level: low / medium / high
 
 用户消息：
 {user_message}
@@ -503,7 +504,9 @@ research_summary：
     "read_only": true,
     "data_sources": ["web_research", "db_search"]
   }},
-  "reason": "用户需要查询校车时刻表，当前系统缺少该能力"
+  "reason": "用户需要查询校车时刻表，当前系统缺少该能力",
+  "confidence_score": 0.82,
+  "risk_level": "medium"
 }}
 """.strip()
 

@@ -1,5 +1,5 @@
-from sqlalchemy import JSON, String, Text
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import Float, JSON, String, Text
+from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin
 
@@ -18,9 +18,19 @@ class CapabilityProposal(Base, TimestampMixin):
     research_summary_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     proposal_json: Mapped[dict] = mapped_column(JSON, nullable=False)
 
+    confidence_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    risk_level: Mapped[str] = mapped_column(String(20), default="medium", nullable=False, index=True)
+    activation_policy: Mapped[str] = mapped_column(
+        String(20),
+        default="review_required",
+        nullable=False,
+        index=True,
+    )  # auto_activate / review_required / reject
+    validation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     status: Mapped[str] = mapped_column(
         String(20),
         default="draft",
         nullable=False,
         index=True,
-    )
+    )  # draft / validated / activated / rejected

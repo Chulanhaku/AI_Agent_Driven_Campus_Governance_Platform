@@ -26,7 +26,7 @@ from app.db.models.resourse_booking import ResourceBooking,Resource,IntegritySco
 from app.db.models.notification import Notification
 from app.db.models.zero_form_approval import ApprovalTemplate, ZeroFormApprovalRequest
 from app.db.models.capability_proposal import CapabilityProposal
-
+from app.db.models.tool_spec_artifact import ToolSpecArtifact
 
 __all__ = [
     "Role",
@@ -61,4 +61,5 @@ __all__ = [
     "ApprovalTemplate",
     "ZeroFormApprovalRequest",
     "CapabilityProposal",
+    "ToolSpecArtifact",
 ]

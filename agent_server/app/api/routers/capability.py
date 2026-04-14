@@ -1,14 +1,87 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db_dep
+from app.api.deps import get_capability_registry, get_db_dep
 from app.db.repositories.capability_proposal_repository import CapabilityProposalRepository
-from app.api.deps import get_capability_registry
+from app.self_iteration.capability_bootstrap import CapabilityBootstrap
+from app.self_iteration.capability_loader import CapabilityLoader
 from app.self_iteration.capability_registry import CapabilityRegistry
-
+from app.self_iteration.capability_detector import CapabilityDetector
+from app.self_iteration.capability_designer import CapabilityDesigner
+from app.self_iteration.capability_researcher import CapabilityResearcher
+from app.self_iteration.capability_validator import CapabilityValidator
+from app.self_iteration.capability_policy import CapabilityPolicy
+from app.self_iteration.capability_service import CapabilityService
+from app.api.deps import get_app_container
+from app.tools.web_research_tool import WebResearchTool
+from app.tools.db_schema_search_tool import DbSchemaSearchTool
+from app.tools.db_data_search_tool import DbDataSearchTool
+from app.db.repositories.tool_spec_artifact_repository import ToolSpecArtifactRepository
+from app.self_iteration.tool_spec_codegen import ToolSpecCodegen
+from app.self_iteration.tool_spec_service import ToolSpecService
 
 router = APIRouter(prefix="/capabilities", tags=["capabilities"])
 
+
+def get_capability_service(
+    db: Session = Depends(get_db_dep),
+    capability_registry: CapabilityRegistry = Depends(get_capability_registry),
+    container = Depends(get_app_container),
+) -> CapabilityService:
+    web_research_tool = WebResearchTool()
+    db_schema_search_tool = DbSchemaSearchTool(db)
+    db_data_search_tool = DbDataSearchTool(db)
+
+    capability_proposal_repository = CapabilityProposalRepository(db)
+    capability_detector = CapabilityDetector()
+    capability_researcher = CapabilityResearcher(
+        web_research_tool=web_research_tool,
+        db_schema_search_tool=db_schema_search_tool,
+        db_data_search_tool=db_data_search_tool,
+    )
+    capability_designer = CapabilityDesigner(container.llm_provider)
+    capability_validator = CapabilityValidator()
+    capability_loader = CapabilityLoader(capability_registry)
+    capability_policy = CapabilityPolicy()
+
+    return CapabilityService(
+        capability_proposal_repository=capability_proposal_repository,
+        capability_detector=capability_detector,
+        capability_researcher=capability_researcher,
+        capability_designer=capability_designer,
+        capability_validator=capability_validator,
+        capability_loader=capability_loader,
+        capability_policy=capability_policy,
+    )
+
+def get_tool_spec_service(
+    db: Session = Depends(get_db_dep),
+) -> ToolSpecService:
+    capability_proposal_repository = CapabilityProposalRepository(db)
+    tool_spec_artifact_repository = ToolSpecArtifactRepository(db)
+    tool_spec_codegen = ToolSpecCodegen()
+
+    return ToolSpecService(
+        capability_proposal_repository=capability_proposal_repository,
+        tool_spec_artifact_repository=tool_spec_artifact_repository,
+        tool_spec_codegen=tool_spec_codegen,
+    )
+
+
+@router.post("/{proposal_id}/generate-tool-stub")
+def generate_tool_stub_from_proposal(
+    proposal_id: int,
+    tool_spec_service: ToolSpecService = Depends(get_tool_spec_service),
+) -> dict:
+    try:
+        return tool_spec_service.generate_stub_from_tool_spec(
+            proposal_id=proposal_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
 
 @router.get("/registry")
 def get_capability_registry_snapshot(
@@ -34,8 +107,65 @@ def list_capability_proposals(
             "capability_name": item.capability_name,
             "research_summary_json": item.research_summary_json,
             "proposal_json": item.proposal_json,
+            "confidence_score": item.confidence_score,
+            "risk_level": item.risk_level,
+            "activation_policy": item.activation_policy,
+            "validation_reason": item.validation_reason,
             "status": item.status,
             "created_at": item.created_at.isoformat() if item.created_at else None,
         }
         for item in items
     ]
+
+@router.post("/reload")
+def reload_activated_capabilities(
+    db: Session = Depends(get_db_dep),
+    capability_registry: CapabilityRegistry = Depends(get_capability_registry),
+) -> dict:
+    repository = CapabilityProposalRepository(db)
+    loader = CapabilityLoader(capability_registry)
+    bootstrap = CapabilityBootstrap(
+        capability_proposal_repository=repository,
+        capability_loader=loader,
+    )
+    return bootstrap.reload_activated_proposals()
+
+
+@router.get("/validated")
+def list_validated_capability_proposals(
+    limit: int = Query(default=100, ge=1, le=500),
+    capability_service: CapabilityService = Depends(get_capability_service),
+) -> list[dict]:
+    return capability_service.list_validated_proposals(limit=limit)
+
+
+@router.post("/{proposal_id}/approve")
+def approve_validated_capability_proposal(
+    proposal_id: int,
+    capability_service: CapabilityService = Depends(get_capability_service),
+) -> dict:
+    try:
+        return capability_service.approve_validated_proposal(
+            proposal_id=proposal_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+
+@router.post("/{proposal_id}/reject")
+def reject_validated_capability_proposal(
+    proposal_id: int,
+    capability_service: CapabilityService = Depends(get_capability_service),
+) -> dict:
+    try:
+        return capability_service.reject_validated_proposal(
+            proposal_id=proposal_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc

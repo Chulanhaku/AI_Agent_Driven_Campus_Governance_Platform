@@ -58,7 +58,7 @@ from app.api.deps import get_capability_registry
 from app.self_iteration.capability_validator import CapabilityValidator
 from app.self_iteration.capability_loader import CapabilityLoader
 from app.self_iteration.capability_registry import CapabilityRegistry
-
+from app.self_iteration.capability_policy import CapabilityPolicy
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -136,6 +136,7 @@ def get_agent_session_service(
         db_data_search_tool=db_data_search_tool,
     )
     capability_designer = CapabilityDesigner(llm_provider)
+    capability_policy = CapabilityPolicy()
     capability_service = CapabilityService(
         capability_proposal_repository=capability_proposal_repository,
         capability_detector=capability_detector,
@@ -143,9 +144,9 @@ def get_agent_session_service(
         capability_designer=capability_designer,
         capability_validator=capability_validator,
         capability_loader=capability_loader,
+        capability_policy=capability_policy,
 
     )
-
 
     return AgentSessionService(
         agent_session_repository=agent_session_repository,

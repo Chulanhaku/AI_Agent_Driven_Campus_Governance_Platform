@@ -48,3 +48,33 @@ class CapabilityLoader:
             "activation_type": proposal_type,
             "loaded_count": 0,
         }
+
+    def load_many(
+        self,
+        *,
+        proposals: list[dict],
+        reset_first: bool = False,
+    ) -> dict:
+        if reset_first:
+            self.capability_registry.clear()
+
+        loaded_items = []
+        total_loaded_count = 0
+
+        for proposal in proposals:
+            result = self.load(proposal=proposal)
+            loaded_items.append(
+                {
+                    "capability_name": proposal.get("capability_name"),
+                    "proposal_type": proposal.get("proposal_type"),
+                    "result": result,
+                }
+            )
+            total_loaded_count += result.get("loaded_count", 0)
+
+        return {
+            "success": True,
+            "proposal_count": len(proposals),
+            "total_loaded_count": total_loaded_count,
+            "items": loaded_items,
+        }

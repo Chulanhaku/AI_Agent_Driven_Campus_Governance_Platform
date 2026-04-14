@@ -3,6 +3,10 @@ class CapabilityRegistry:
         self.intent_aliases: dict[str, str] = {}
         self.plan_patches: dict[str, dict] = {}
 
+    def clear(self) -> None:
+        self.intent_aliases.clear()
+        self.plan_patches.clear()
+
     def register_intent_alias(
         self,
         *,
@@ -44,4 +48,6 @@ class CapabilityRegistry:
         return {
             "intent_aliases": dict(self.intent_aliases),
             "plan_patches": dict(self.plan_patches),
+            "intent_alias_count": len(self.intent_aliases),
+            "plan_patch_count": len(self.plan_patches),
         }

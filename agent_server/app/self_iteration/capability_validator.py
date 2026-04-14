@@ -39,21 +39,62 @@ class CapabilityValidator:
         proposal: dict,
     ) -> dict:
         proposal_type = proposal.get("proposal_type")
+        llm_confidence = float(proposal.get("confidence_score", 0.5) or 0.5)
+        llm_risk = proposal.get("risk_level", "medium") or "medium"
+
         if proposal_type not in self.allowed_proposal_types:
             return {
                 "valid": False,
                 "reason": f"proposal_type not allowed: {proposal_type}",
+                "confidence_score": 0.0,
+                "risk_level": "high",
+                "activation_policy_candidate": "reject",
             }
 
         if proposal_type == "knowledge_patch":
-            return self._validate_knowledge_patch(proposal=proposal)
+            result = self._validate_knowledge_patch(proposal=proposal)
+        elif proposal_type == "plan_patch":
+            result = self._validate_plan_patch(proposal=proposal)
+        else:
+            result = {
+                "valid": True,
+                "reason": "tool_spec kept as non-auto-activatable draft",
+            }
 
-        if proposal_type == "plan_patch":
-            return self._validate_plan_patch(proposal=proposal)
+        # 轻量合成置信度和风险
+        confidence_score = llm_confidence
+        risk_level = llm_risk
+
+        if not result["valid"]:
+            confidence_score = min(confidence_score, 0.2)
+            risk_level = "high"
+
+        if proposal_type == "tool_spec":
+            risk_level = "high"
+
+        if proposal_type == "knowledge_patch" and result["valid"]:
+            risk_level = "low" if llm_risk in {"low", "medium"} else llm_risk
+
+        if proposal_type == "plan_patch" and result["valid"]:
+            if risk_level == "low":
+                risk_level = "medium"
+
+        activation_policy_candidate = "review_required"
+        if not result["valid"]:
+            activation_policy_candidate = "reject"
+        elif proposal_type == "knowledge_patch" and confidence_score >= 0.75 and risk_level == "low":
+            activation_policy_candidate = "auto_activate"
+        elif proposal_type == "plan_patch" and confidence_score >= 0.88 and risk_level == "medium":
+            activation_policy_candidate = "auto_activate"
+        else:
+            activation_policy_candidate = "review_required"
 
         return {
-            "valid": True,
-            "reason": "tool_spec kept as non-auto-activatable draft",
+            "valid": result["valid"],
+            "reason": result["reason"],
+            "confidence_score": round(confidence_score, 4),
+            "risk_level": risk_level,
+            "activation_policy_candidate": activation_policy_candidate,
         }
 
     def _validate_knowledge_patch(

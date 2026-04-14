@@ -18,6 +18,10 @@ class CapabilityProposalRepository:
         research_summary_json: dict | None,
         proposal_json: dict,
         status: str = "draft",
+        confidence_score: float = 0.0,
+        risk_level: str = "medium",
+        activation_policy: str = "review_required",
+        validation_reason: str | None = None,
     ) -> CapabilityProposal:
         item = CapabilityProposal(
             session_id=session_id,
@@ -28,6 +32,10 @@ class CapabilityProposalRepository:
             research_summary_json=research_summary_json,
             proposal_json=proposal_json,
             status=status,
+            confidence_score=confidence_score,
+            risk_level=risk_level,
+            activation_policy=activation_policy,
+            validation_reason=validation_reason,
         )
         self.db.add(item)
         self.db.flush()
@@ -56,6 +64,32 @@ class CapabilityProposalRepository:
             .all()
         )
 
+    def list_activated(
+        self,
+        *,
+        limit: int = 500,
+    ) -> list[CapabilityProposal]:
+        return (
+            self.db.query(CapabilityProposal)
+            .filter(CapabilityProposal.status == "activated")
+            .order_by(CapabilityProposal.id.asc())
+            .limit(limit)
+            .all()
+        )
+
+    def list_validated(
+        self,
+        *,
+        limit: int = 100,
+    ) -> list[CapabilityProposal]:
+        return (
+            self.db.query(CapabilityProposal)
+            .filter(CapabilityProposal.status == "validated")
+            .order_by(CapabilityProposal.id.asc())
+            .limit(limit)
+            .all()
+        )
+
     def update_status(
         self,
         *,
@@ -63,6 +97,24 @@ class CapabilityProposalRepository:
         status: str,
     ) -> CapabilityProposal:
         item.status = status
+        self.db.flush()
+        return item
+
+    def update_decision(
+        self,
+        *,
+        item: CapabilityProposal,
+        status: str,
+        confidence_score: float,
+        risk_level: str,
+        activation_policy: str,
+        validation_reason: str | None,
+    ) -> CapabilityProposal:
+        item.status = status
+        item.confidence_score = confidence_score
+        item.risk_level = risk_level
+        item.activation_policy = activation_policy
+        item.validation_reason = validation_reason
         self.db.flush()
         return item
 
