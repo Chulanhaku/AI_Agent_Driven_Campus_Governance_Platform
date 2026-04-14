@@ -169,3 +169,54 @@ def reject_validated_capability_proposal(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
+    
+
+@router.get("/artifacts")
+def list_tool_spec_artifacts(
+    limit: int = Query(default=100, ge=1, le=500),
+    tool_spec_service: ToolSpecService = Depends(get_tool_spec_service),
+) -> list[dict]:
+    return tool_spec_service.list_artifacts(limit=limit)
+
+
+@router.post("/artifacts/{artifact_id}/review")
+def review_tool_spec_artifact(
+    artifact_id: int,
+    approved: bool = Query(...),
+    review_comment: str | None = Query(default=None),
+    tool_spec_service: ToolSpecService = Depends(get_tool_spec_service),
+) -> dict:
+    try:
+        return tool_spec_service.review_artifact(
+            artifact_id=artifact_id,
+            approved=approved,
+            review_comment=review_comment,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    
+
+
+@router.post("/artifacts/{artifact_id}/implement")
+def mark_tool_spec_artifact_as_implemented(
+    artifact_id: int,
+    implemented_tool_name: str = Query(...),
+    implemented_module_path: str = Query(...),
+    review_comment: str | None = Query(default=None),
+    tool_spec_service: ToolSpecService = Depends(get_tool_spec_service),
+) -> dict:
+    try:
+        return tool_spec_service.mark_artifact_as_implemented(
+            artifact_id=artifact_id,
+            implemented_tool_name=implemented_tool_name,
+            implemented_module_path=implemented_module_path,
+            review_comment=review_comment,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc

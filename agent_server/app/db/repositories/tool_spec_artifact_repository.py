@@ -33,6 +33,57 @@ class ToolSpecArtifactRepository:
         self.db.flush()
         return item
 
+    def get_by_id(
+        self,
+        *,
+        artifact_id: int,
+    ) -> ToolSpecArtifact | None:
+        return (
+            self.db.query(ToolSpecArtifact)
+            .filter(ToolSpecArtifact.id == artifact_id)
+            .first()
+        )
+
+    def list_recent(
+        self,
+        *,
+        limit: int = 100,
+    ) -> list[ToolSpecArtifact]:
+        return (
+            self.db.query(ToolSpecArtifact)
+            .order_by(ToolSpecArtifact.id.desc())
+            .limit(limit)
+            .all()
+        )
+
+    def update_review(
+        self,
+        *,
+        item: ToolSpecArtifact,
+        status: str,
+        review_comment: str | None,
+    ) -> ToolSpecArtifact:
+        item.status = status
+        item.review_comment = review_comment
+        self.db.flush()
+        return item
+
+    def update_implemented(
+        self,
+        *,
+        item: ToolSpecArtifact,
+        implemented_tool_name: str,
+        implemented_module_path: str,
+        review_comment: str | None = None,
+    ) -> ToolSpecArtifact:
+        item.status = "implemented"
+        item.implemented_tool_name = implemented_tool_name
+        item.implemented_module_path = implemented_module_path
+        if review_comment is not None:
+            item.review_comment = review_comment
+        self.db.flush()
+        return item
+
     def commit(self) -> None:
         self.db.commit()
 

@@ -58,3 +58,95 @@ class ToolSpecService:
         except Exception:
             self.tool_spec_artifact_repository.rollback()
             raise
+
+    def list_artifacts(
+        self,
+        *,
+        limit: int = 100,
+    ) -> list[dict]:
+        items = self.tool_spec_artifact_repository.list_recent(limit=limit)
+        return [
+            {
+                "id": item.id,
+                "proposal_id": item.proposal_id,
+                "capability_name": item.capability_name,
+                "tool_name": item.tool_name,
+                "file_path": item.file_path,
+                "artifact_type": item.artifact_type,
+                "status": item.status,
+                "review_comment": item.review_comment,
+                "implemented_tool_name": item.implemented_tool_name,
+                "implemented_module_path": item.implemented_module_path,
+                "created_at": item.created_at.isoformat() if item.created_at else None,
+            }
+            for item in items
+        ]
+
+    def review_artifact(
+        self,
+        *,
+        artifact_id: int,
+        approved: bool,
+        review_comment: str | None = None,
+    ) -> dict:
+        item = self.tool_spec_artifact_repository.get_by_id(artifact_id=artifact_id)
+        if item is None:
+            raise ValueError("Tool spec artifact not found")
+
+        if item.status not in {"generated", "reviewed"}:
+            raise ValueError("Only generated/reviewed artifact can be reviewed")
+
+        new_status = "reviewed" if approved else "rejected"
+
+        try:
+            self.tool_spec_artifact_repository.update_review(
+                item=item,
+                status=new_status,
+                review_comment=review_comment,
+            )
+            self.tool_spec_artifact_repository.commit()
+
+            return {
+                "success": True,
+                "artifact_id": item.id,
+                "status": item.status,
+                "review_comment": item.review_comment,
+            }
+        except Exception:
+            self.tool_spec_artifact_repository.rollback()
+            raise
+
+    def mark_artifact_as_implemented(
+        self,
+        *,
+        artifact_id: int,
+        implemented_tool_name: str,
+        implemented_module_path: str,
+        review_comment: str | None = None,
+    ) -> dict:
+        item = self.tool_spec_artifact_repository.get_by_id(artifact_id=artifact_id)
+        if item is None:
+            raise ValueError("Tool spec artifact not found")
+
+        if item.status not in {"generated", "reviewed"}:
+            raise ValueError("Only generated/reviewed artifact can be marked as implemented")
+
+        try:
+            self.tool_spec_artifact_repository.update_implemented(
+                item=item,
+                implemented_tool_name=implemented_tool_name,
+                implemented_module_path=implemented_module_path,
+                review_comment=review_comment,
+            )
+            self.tool_spec_artifact_repository.commit()
+
+            return {
+                "success": True,
+                "artifact_id": item.id,
+                "status": item.status,
+                "implemented_tool_name": item.implemented_tool_name,
+                "implemented_module_path": item.implemented_module_path,
+            }
+        except Exception:
+            self.tool_spec_artifact_repository.rollback()
+            raise
