@@ -4,7 +4,8 @@ from app.llm.base import BaseLlmProvider
 from app.llm.embeddings_provider import BaseEmbeddingsProvider
 from app.rag.rag_service import RagService
 from app.self_iteration.capability_registry import CapabilityRegistry
-
+from app.self_iteration.dynamic_tool_registry import DynamicToolRegistry
+from app.self_iteration.dynamic_plan_registry import DynamicPlanRegistry
 
 @dataclass
 class AppContainer:
@@ -12,3 +13,5 @@ class AppContainer:
     embeddings_provider: BaseEmbeddingsProvider
     rag_service: RagService
     capability_registry: CapabilityRegistry
+    dynamic_tool_registry: DynamicToolRegistry
+    dynamic_plan_registry: DynamicPlanRegistry

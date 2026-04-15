@@ -2,7 +2,7 @@ from app.llm.base import BaseLlmProvider
 
 
 class LocalLlmProvider(BaseLlmProvider):
-    def classify_intent(self, *, message: str) -> dict:
+    def classify_intent(self, *, message: str ,supported_primary_intents: list[str] | None = None,supported_secondary_intents: list[str] | None = None,) -> dict:
         return {
             "intent": "fallback",
             "confidence": 0.0,
@@ -55,11 +55,27 @@ class LocalLlmProvider(BaseLlmProvider):
         *,
         message: str,
         memory_summary: str | None = None,
+        supported_primary_intents: list[str] | None = None,
+        supported_secondary_intents: list[str] | None = None,
     ) -> dict:
         return {
             "primary_intent": "fallback",
             "secondary_intents": [],
-            "slots": {},
+            "slots": {
+                "amount": None,
+                "leave_days": None,
+                "leave_reason": None,
+                "semester": None,
+                "resource_type": None,
+                "booking_start_time": None,
+                "booking_end_time": None,
+                "selected_plan_index": None,
+                "selected_resource_index": None,
+                "approval_type": None,
+                "approval_reason": None,
+                "start_date": None,
+                "end_date": None,
+            },
         }
     
     def compose_tool_response(
@@ -127,4 +143,18 @@ class LocalLlmProvider(BaseLlmProvider):
             "research_summary": research_summary,
             "confidence_score": 0.55,
             "risk_level": "medium",
+        }
+    
+
+    def extract_dynamic_slots(
+        self,
+        *,
+        user_message: str,
+        primary_intent: str,
+        input_schema_json: dict,
+        memory_summary: str | None,
+    ) -> dict:
+        return {
+            key: None
+            for key in input_schema_json.keys()
         }

@@ -15,6 +15,17 @@ from app.llm.openai_provider import OpenAiProvider
 from app.rag.rag_service import RagService
 from database.seeds.seed_policy_handbook import seed_policy_handbook
 from app.self_iteration.capability_registry import CapabilityRegistry
+from sqlalchemy.orm import Session
+
+from app.db.repositories.capability_proposal_repository import CapabilityProposalRepository
+from app.self_iteration.capability_bootstrap import CapabilityBootstrap
+from app.self_iteration.capability_loader import CapabilityLoader
+
+from app.self_iteration.dynamic_tool_registry import DynamicToolRegistry
+from app.self_iteration.dynamic_plan_registry import DynamicPlanRegistry
+from app.self_iteration.dynamic_capability_bootstrap import DynamicCapabilityBootstrap
+from app.db.repositories.dynamic_tool_definition_repository import DynamicToolDefinitionRepository
+from app.db.repositories.dynamic_plan_definition_repository import DynamicPlanDefinitionRepository
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +94,41 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     llm_provider = build_llm_provider()
     embeddings_provider = build_embeddings_provider()
     capability_registry = CapabilityRegistry()
+    dynamic_tool_registry = DynamicToolRegistry()
+    dynamic_plan_registry = DynamicPlanRegistry()
+    bootstrap_result = None
+    db: Session | None = None
+    try:
+        db = SessionLocal()
+        capability_proposal_repository = CapabilityProposalRepository(db)
+        capability_loader = CapabilityLoader(capability_registry)
+        capability_bootstrap = CapabilityBootstrap(
+            capability_proposal_repository=capability_proposal_repository,
+            capability_loader=capability_loader,
+        )
+        bootstrap_result = capability_bootstrap.reload_activated_proposals()
+        logger.info("capability bootstrap result: %s", bootstrap_result)
+
+        dynamic_tool_definition_repository = DynamicToolDefinitionRepository(db)
+        dynamic_plan_definition_repository = DynamicPlanDefinitionRepository(db)
+        dynamic_bootstrap = DynamicCapabilityBootstrap(
+            dynamic_tool_definition_repository=dynamic_tool_definition_repository,
+            dynamic_plan_definition_repository=dynamic_plan_definition_repository,
+            dynamic_tool_registry=dynamic_tool_registry,
+            dynamic_plan_registry=dynamic_plan_registry,
+        )
+        dynamic_bootstrap_result = dynamic_bootstrap.reload_active_definitions()
+        logger.info("dynamic capability bootstrap result: %s", dynamic_bootstrap_result)
+
+
+    except Exception as exc:
+        logger.exception("capability bootstrap failed: %s", exc)
+    finally:
+        if db is not None:
+            db.close()
+
+
+
     rag_service = RagService(
         embeddings_provider=embeddings_provider,
     )
@@ -97,6 +143,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         embeddings_provider=embeddings_provider,
         rag_service=rag_service,
         capability_registry=capability_registry,
+        dynamic_tool_registry=dynamic_tool_registry,
+        dynamic_plan_registry=dynamic_plan_registry,
     )
 
     logger.info("application container initialized")

@@ -54,7 +54,7 @@ from app.self_iteration.capability_service import CapabilityService
 from app.tools.web_research_tool import WebResearchTool
 from app.tools.db_schema_search_tool import DbSchemaSearchTool
 from app.tools.db_data_search_tool import DbDataSearchTool
-from app.api.deps import get_capability_registry
+from app.api.deps import get_capability_registry,get_dynamic_tool_registry,get_dynamic_plan_registry
 from app.self_iteration.capability_validator import CapabilityValidator
 from app.self_iteration.capability_loader import CapabilityLoader
 from app.self_iteration.capability_registry import CapabilityRegistry
@@ -68,6 +68,8 @@ def get_agent_session_service(
     llm_provider: BaseLlmProvider = Depends(get_llm_provider),
     retriever: Retriever = Depends(get_retriever),
     capability_registry :CapabilityRegistry = Depends(get_capability_registry),
+    dynamic_tool_registry=Depends(get_dynamic_tool_registry),
+    dynamic_plan_registry=Depends(get_dynamic_plan_registry),
 ) -> AgentSessionService:
     settings = get_settings()
 
@@ -148,6 +150,7 @@ def get_agent_session_service(
 
     )
 
+
     return AgentSessionService(
         agent_session_repository=agent_session_repository,
         agent_memory_service=agent_memory_service,          
@@ -167,6 +170,9 @@ def get_agent_session_service(
         zero_form_approval_service=zero_form_approval_service,
         capability_service=capability_service,
         capability_registry=capability_registry,
+        db_session=db,
+        dynamic_tool_registry=dynamic_tool_registry,
+        dynamic_plan_registry=dynamic_plan_registry,
     )
 
 def get_tool_execution_log_service(

@@ -8,6 +8,8 @@ class BaseLlmProvider(ABC):
         *,
         message: str,
         recent_messages_text: str | None = None,
+        supported_primary_intents: list[str] | None = None,
+        supported_secondary_intents: list[str] | None = None,
     ) -> dict:
         raise NotImplementedError
 
@@ -21,6 +23,8 @@ class BaseLlmProvider(ABC):
         *,
         message: str,
         memory_summary: str | None = None,
+        supported_primary_intents: list[str] | None = None,
+        supported_secondary_intents: list[str] | None = None,
     ) -> dict:
         raise NotImplementedError
 
@@ -82,6 +86,18 @@ class BaseLlmProvider(ABC):
         *,
         user_message: str,
         research_summary: dict,
+        memory_summary: str | None,
+    ) -> dict:
+        raise NotImplementedError
+    
+
+    @abstractmethod
+    def extract_dynamic_slots(
+        self,
+        *,
+        user_message: str,
+        primary_intent: str,
+        input_schema_json: dict,
         memory_summary: str | None,
     ) -> dict:
         raise NotImplementedError

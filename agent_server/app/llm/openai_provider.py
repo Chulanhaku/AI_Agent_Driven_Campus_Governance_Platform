@@ -28,7 +28,15 @@ class OpenAiProvider(BaseLlmProvider):
         *,
         message: str,
         memory_summary: str | None = None,
+        supported_primary_intents: list[str] | None = None,
+        supported_secondary_intents: list[str] | None = None,
     ) -> dict:
+        primary_intent_lines = "\n".join(
+            [f"- {item}" for item in (supported_primary_intents or [])]
+        )
+        secondary_intent_lines = "\n".join(
+            [f"- {item}" for item in (supported_secondary_intents or [])]
+        )
         prompt = f"""
 你是一个校园事务 Agent 的请求解析器。
 请从用户输入中提取：
@@ -39,21 +47,10 @@ class OpenAiProvider(BaseLlmProvider):
 请只输出 JSON，不要输出任何额外文字。
 
 支持的 primary_intent:
-- query_schedule
-- campus_card_topup
-- leave_create
-- policy_qa
-- course_plan_generate
-- course_plan_submit
-- resource_booking_generate
-- resource_booking_submit
-- zero_form_approval_generate
-- zero_form_approval_submit
-- fallback
+{primary_intent_lines}
 
 支持的 secondary_intents:
-- time_planning_advice
-- weekly_busyness_analysis
+{secondary_intent_lines}
 
 请提取可能的 slots：
 - amount: 字符串或 null
@@ -118,23 +115,21 @@ class OpenAiProvider(BaseLlmProvider):
         *,
         message: str,
         recent_messages_text: str | None = None,
+        supported_primary_intents: list[str] | None = None,
+        supported_secondary_intents: list[str] | None = None,
     ) -> dict:
+        primary_intent_lines = "\n".join(
+            [f"- {item}" for item in (supported_primary_intents or [])]
+        )
+        secondary_intent_lines = "\n".join(
+            [f"- {item}" for item in (supported_secondary_intents or [])]
+        )
         prompt = f"""
 你是一个校务 Agent 的意图分类器。
 请只输出 JSON，不要输出任何额外文字。
 
 支持的 intent:
-- query_schedule
-- campus_card_topup
-- leave_create
-- policy_qa
-- course_plan_generate
-- course_plan_submit
-- resource_booking_generate
-- resource_booking_submit
-- zero_form_approval_generate
-- zero_form_approval_submit
-- fallback
+{primary_intent_lines}
 
 分类规则：
 1. 用户请求生成、推荐、安排选课方案时，返回 course_plan_generate
@@ -507,6 +502,51 @@ research_summary：
   "reason": "用户需要查询校车时刻表，当前系统缺少该能力",
   "confidence_score": 0.82,
   "risk_level": "medium"
+}}
+""".strip()
+
+        content = self._chat(prompt)
+        return self.output_parser.parse_json(content)
+    
+
+
+
+    def extract_dynamic_slots(
+        self,
+        *,
+        user_message: str,
+        primary_intent: str,
+        input_schema_json: dict,
+        memory_summary: str | None,
+    ) -> dict:
+        prompt = f"""
+你是一个校园事务 Agent 的动态参数提取器。
+当前用户消息已经匹配到一个动态 intent，请根据给定的输入 schema 提取参数。
+
+请只输出 JSON，不要输出任何额外文字。
+
+primary_intent:
+{primary_intent}
+
+input_schema_json:
+{input_schema_json}
+
+要求：
+1. 只输出 schema 中定义的字段
+2. 无法确定就输出 null
+3. 不要编造没有明确表达的信息
+
+会话摘要：
+{memory_summary or "无"}
+
+用户消息：
+{user_message}
+
+输出示例：
+{{
+  "keyword": "程序",
+  "campus": null,
+  "date": null
 }}
 """.strip()
 

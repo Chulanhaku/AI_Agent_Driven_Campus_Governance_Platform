@@ -1,18 +1,21 @@
 import re
 
 from app.llm.base import BaseLlmProvider
+from app.self_iteration import dynamic_plan_registry
 from app.utils.semester_utils import SemesterUtils
 from datetime import datetime, timedelta
+from app.agent.intent_catalog import IntentCatalog
 
 class AgentRouter:
     def __init__(
         self,
         llm_provider: BaseLlmProvider | None = None,
         capability_registry=None,
+        dynamic_plan_registry=None,
     ) -> None:
         self.llm_provider = llm_provider
         self.capability_registry = capability_registry
-
+        self.dynamic_plan_registry = dynamic_plan_registry
 
     # def detect_intent(self, message: str) -> str:
     #     rule_intent = self._detect_intent_by_rules(message)
@@ -37,6 +40,14 @@ class AgentRouter:
     #             pass
 
     #     return "fallback"
+    def get_supported_primary_intents(self) -> list[str]:
+        dynamic_intents = []
+        if self.dynamic_plan_registry is not None:
+            dynamic_intents = self.dynamic_plan_registry.list_primary_intents()
+
+        return IntentCatalog.merge_primary_intents(
+            dynamic_primary_intents=dynamic_intents,
+        )
 
     def parse_request(
         self,
@@ -63,13 +74,16 @@ class AgentRouter:
         if booking_time_range is not None:
             rule_slots["booking_start_time"] = booking_time_range[0]
             rule_slots["booking_end_time"] = booking_time_range[1]
-
+        supported_primary_intents = self.get_supported_primary_intents()
+        supported_secondary_intents = IntentCatalog.get_static_secondary_intents()
         llm_result = None
         if self.llm_provider is not None:
             try:
                 llm_result = self.llm_provider.parse_user_request(
                     message=message,
                     memory_summary=memory_summary,
+                    supported_primary_intents=supported_primary_intents,
+                    supported_secondary_intents=supported_secondary_intents,
                 )
             except Exception:
                 llm_result = None
@@ -130,20 +144,24 @@ class AgentRouter:
                     recent_messages_text=recent_messages_text,
                 )
                 intent = result.get("intent", "fallback")
-                if intent in {
-                    "query_schedule",
-                    "campus_card_topup",
-                    "leave_create",
-                    "policy_qa",
-                    "fallback",
-                    "course_plan_generate",
-                    "course_plan_submit",
-                    "resource_booking_generate",
-                    "resource_booking_submit",
-                    "zero_form_approval_generate",
-                    "zero_form_approval_submit",
-                }:
+                allowed_intent = set(self.get_supported_primary_intents())
+                if intent in allowed_intent:
                     return intent
+                # if intent in {
+                #     "query_schedule",
+                #     "campus_card_topup",
+                #     "leave_create",
+                #     "policy_qa",
+                #     "fallback",
+                #     "course_plan_generate",
+                #     "course_plan_submit",
+                #     "resource_booking_generate",
+                #     "resource_booking_submit",
+                #     "zero_form_approval_generate",
+                #     "zero_form_approval_submit",
+                #     "dynamic_course_catalog_query",
+                # }:
+                #     return intent
             except Exception:
                 pass
 

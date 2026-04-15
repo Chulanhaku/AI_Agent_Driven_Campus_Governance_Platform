@@ -27,6 +27,7 @@ from app.db.models.notification import Notification
 from app.db.models.zero_form_approval import ApprovalTemplate, ZeroFormApprovalRequest
 from app.db.models.capability_proposal import CapabilityProposal
 from app.db.models.tool_spec_artifact import ToolSpecArtifact
+from app.db.models.dynamic_capability import DynamicToolDefinition, DynamicPlanDefinition
 
 __all__ = [
     "Role",
@@ -62,4 +63,6 @@ __all__ = [
     "ZeroFormApprovalRequest",
     "CapabilityProposal",
     "ToolSpecArtifact",
+    "DynamicToolDefinition",
+    "DynamicPlanDefinition",
 ]

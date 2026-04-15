@@ -19,6 +19,14 @@ from app.tools.db_data_search_tool import DbDataSearchTool
 from app.db.repositories.tool_spec_artifact_repository import ToolSpecArtifactRepository
 from app.self_iteration.tool_spec_codegen import ToolSpecCodegen
 from app.self_iteration.tool_spec_service import ToolSpecService
+from app.db.repositories.dynamic_tool_definition_repository import DynamicToolDefinitionRepository
+from app.db.repositories.dynamic_plan_definition_repository import DynamicPlanDefinitionRepository
+from app.self_iteration.dynamic_definition_factory import DynamicDefinitionFactory
+from app.self_iteration.dynamic_definition_service import DynamicDefinitionService
+from app.self_iteration.dynamic_capability_bootstrap import DynamicCapabilityBootstrap
+from app.api.deps import get_dynamic_tool_registry, get_dynamic_plan_registry
+from app.self_iteration.dynamic_tool_registry import DynamicToolRegistry
+from app.self_iteration.dynamic_plan_registry import DynamicPlanRegistry
 
 router = APIRouter(prefix="/capabilities", tags=["capabilities"])
 
@@ -67,6 +75,30 @@ def get_tool_spec_service(
         tool_spec_codegen=tool_spec_codegen,
     )
 
+def get_dynamic_definition_service(
+    db: Session = Depends(get_db_dep),
+    dynamic_tool_registry: DynamicToolRegistry = Depends(get_dynamic_tool_registry),
+    dynamic_plan_registry: DynamicPlanRegistry = Depends(get_dynamic_plan_registry),
+) -> DynamicDefinitionService:
+    capability_proposal_repository = CapabilityProposalRepository(db)
+    dynamic_tool_definition_repository = DynamicToolDefinitionRepository(db)
+    dynamic_plan_definition_repository = DynamicPlanDefinitionRepository(db)
+
+    dynamic_definition_factory = DynamicDefinitionFactory()
+    dynamic_capability_bootstrap = DynamicCapabilityBootstrap(
+        dynamic_tool_definition_repository=dynamic_tool_definition_repository,
+        dynamic_plan_definition_repository=dynamic_plan_definition_repository,
+        dynamic_tool_registry=dynamic_tool_registry,
+        dynamic_plan_registry=dynamic_plan_registry,
+    )
+
+    return DynamicDefinitionService(
+        capability_proposal_repository=capability_proposal_repository,
+        dynamic_tool_definition_repository=dynamic_tool_definition_repository,
+        dynamic_plan_definition_repository=dynamic_plan_definition_repository,
+        dynamic_definition_factory=dynamic_definition_factory,
+        dynamic_capability_bootstrap=dynamic_capability_bootstrap,
+    )
 
 @router.post("/{proposal_id}/generate-tool-stub")
 def generate_tool_stub_from_proposal(
@@ -143,11 +175,24 @@ def list_validated_capability_proposals(
 def approve_validated_capability_proposal(
     proposal_id: int,
     capability_service: CapabilityService = Depends(get_capability_service),
+    dynamic_definition_service: DynamicDefinitionService = Depends(get_dynamic_definition_service),
 ) -> dict:
     try:
-        return capability_service.approve_validated_proposal(
+        approval_result = capability_service.approve_validated_proposal(
             proposal_id=proposal_id,
         )
+
+        dynamic_registration_result = None
+        if approval_result.get("proposal_type") == "tool_spec":
+            dynamic_registration_result = dynamic_definition_service.register_from_tool_spec_proposal(
+                proposal_id=proposal_id,
+            )
+
+        return {
+            "success": True,
+            "approval_result": approval_result,
+            "dynamic_registration_result": dynamic_registration_result,
+        }
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -220,3 +265,14 @@ def mark_tool_spec_artifact_as_implemented(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
+    
+
+@router.get("/dynamic/registry")
+def get_dynamic_registry_snapshot(
+    dynamic_tool_registry: DynamicToolRegistry = Depends(get_dynamic_tool_registry),
+    dynamic_plan_registry: DynamicPlanRegistry = Depends(get_dynamic_plan_registry),
+) -> dict:
+    return {
+        "dynamic_tools": dynamic_tool_registry.snapshot(),
+        "dynamic_plans": dynamic_plan_registry.snapshot(),
+    }

@@ -41,6 +41,9 @@ from app.tools.zero_form_approval_tools import GenerateZeroFormApprovalTool, Sub
 from app.workflows.zero_form_approval_workflow import ZeroFormApprovalWorkflow
 from app.self_iteration.capability_service import CapabilityService
 from app.self_iteration.capability_registry import CapabilityRegistry
+from app.self_iteration.dynamic_tool_executor import DynamicToolExecutor
+from app.self_iteration.dynamic_capability_service import DynamicCapabilityService
+from app.agent.dynamic_slot_extractor import DynamicSlotExtractor
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +69,9 @@ class AgentSessionService:
         zero_form_approval_service: ZeroFormApprovalService,
         capability_service: CapabilityService,
         capability_registry: CapabilityRegistry,
+        db_session,
+        dynamic_tool_registry,
+        dynamic_plan_registry,
     ) -> None:
         self.agent_session_repository = agent_session_repository
         self.pending_action_repository = pending_action_repository
@@ -77,18 +83,21 @@ class AgentSessionService:
         self.llm_provider = llm_provider
         self.retriever = retriever
         self.rag_top_k = rag_top_k
-
+        self.dynamic_slot_extractor = DynamicSlotExtractor()
 #
         self.capability_registry = capability_registry
         self.router = AgentRouter(
             llm_provider=llm_provider,
             capability_registry=capability_registry,
+            dynamic_plan_registry=dynamic_plan_registry,
         )
         self.planner = Planner(
             llm_provider=llm_provider,
             capability_registry=capability_registry,
         )
-
+        self.db_session = db_session
+        self.dynamic_tool_registry = dynamic_tool_registry
+        self.dynamic_plan_registry = dynamic_plan_registry
 #
         #self.router = AgentRouter(llm_provider=llm_provider)
         self.context_builder = ContextBuilder()
@@ -112,6 +121,15 @@ class AgentSessionService:
         self.zero_form_approval_service = zero_form_approval_service
         
         self.capability_service = capability_service
+
+        dynamic_tool_executor = DynamicToolExecutor(db_session)
+        self.dynamic_capability_service = DynamicCapabilityService(
+            dynamic_plan_registry=dynamic_plan_registry,
+            dynamic_tool_registry=dynamic_tool_registry,
+            dynamic_tool_executor=dynamic_tool_executor,
+            response_composer=self.response_composer,
+        )
+        
 
     def get_user_session(self, session_id: int, user_id: int) -> AgentSession | None:
         return self.agent_session_repository.get_session_by_id_and_user_id(
@@ -877,7 +895,77 @@ class AgentSessionService:
         )
 
         print("llm generator",parsed_request)
-        
+
+        dynamic_plan = self.dynamic_plan_registry.get_plan(
+            primary_intent=intent,
+        )
+        if dynamic_plan is not None:
+            dynamic_tools = self.dynamic_tool_registry.list_tools_by_intent(
+                primary_intent=intent,
+            )
+
+            if dynamic_tools:
+                first_dynamic_tool = dynamic_tools[0]
+                input_schema_json = first_dynamic_tool.get("input_schema_json", {}) or {}
+
+                rule_dynamic_slots = self.dynamic_slot_extractor.extract_from_message(
+                    message=user_message,
+                    input_schema_json=input_schema_json,
+                )
+
+                llm_dynamic_slots = self.llm_provider.extract_dynamic_slots(
+                    user_message=user_message,
+                    primary_intent=intent,
+                    input_schema_json=input_schema_json,
+                    memory_summary=memory_context.get("summary_text"),
+                )
+
+                for key in input_schema_json.keys():
+                    current_value = parsed_slots.get(key)
+                    if current_value in (None, "", []):
+                        parsed_slots[key] = (
+                            rule_dynamic_slots.get(key)
+                            if rule_dynamic_slots.get(key) not in (None, "", [])
+                            else llm_dynamic_slots.get(key)
+                        )
+#        
+        dynamic_result = self.dynamic_capability_service.try_execute(
+            current_user=current_user,
+            user_message=user_message,
+            primary_intent=intent,
+            secondary_intents=secondary_intents,
+            parsed_slots=parsed_slots,
+            memory_context=memory_context,
+        )
+
+        if dynamic_result is not None:
+            if dynamic_result.get("success"):
+                self.audit_service.record(
+                    user_id=current_user.id,
+                    action="dynamic_capability.execute",
+                    target_type="agent_session",
+                    target_id=session_id,
+                    detail_json={
+                        "message": user_message,
+                        "intent": intent,
+                        "tool_results": dynamic_result.get("tool_results", []),
+                    },
+                )
+                return dynamic_result["reply"], False, None
+
+            self.audit_service.record(
+                user_id=current_user.id,
+                action="dynamic_capability.execute_failed",
+                target_type="agent_session",
+                target_id=session_id,
+                detail_json={
+                    "message": user_message,
+                    "intent": intent,
+                    "error": dynamic_result.get("message"),
+                },
+            )
+#  DYNAMIC CAPABILITY END
+
         if intent == "fallback":
             pending_intent = slot_memory.get("pending_intent")
             if pending_intent in {
