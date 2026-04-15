@@ -92,30 +92,39 @@ class DynamicDefinitionFactory:
         return "db_query"
 
     def _build_execution_config(
-        self,
-        *,
-        tool_type: str,
-        proposal: dict,
-        tool_spec: dict,
-    ) -> dict:
-        raw_config = tool_spec.get("execution_config") or {}
+            self,
+            *,
+            tool_type: str,
+            proposal: dict,
+            tool_spec: dict,
+        ) -> dict:
+            raw_config = tool_spec.get("execution_config") or {}
 
-        if tool_type == "db_query":
-            return {
-                "table_name": raw_config.get("table_name"),
-                "allowed_columns": raw_config.get("allowed_columns", []),
-                "keyword_param": raw_config.get("keyword_param", "keyword"),
-                "default_limit": raw_config.get("default_limit", 10),
-                "exact_filters": raw_config.get("exact_filters", {}),
-            }
+            if tool_type == "db_query":
+                table_name = raw_config.get("table_name")
+                allowed_columns = raw_config.get("allowed_columns", []) or []
 
-        if tool_type == "web_search":
-            return {
-                "query_param": raw_config.get("query_param", "keyword"),
-                "max_results": raw_config.get("max_results", 5),
-            }
+                if not table_name:
+                    raise ValueError("db_query tool_spec missing execution_config.table_name")
 
-        return raw_config
+                if not allowed_columns:
+                    raise ValueError("db_query tool_spec missing execution_config.allowed_columns")
+
+                return {
+                    "table_name": table_name,
+                    "allowed_columns": allowed_columns,
+                    "keyword_param": raw_config.get("keyword_param", "keyword"),
+                    "default_limit": raw_config.get("default_limit", 10),
+                    "exact_filters": raw_config.get("exact_filters", {}),
+                }
+
+            if tool_type == "web_search":
+                return {
+                    "query_param": raw_config.get("query_param", "keyword"),
+                    "max_results": raw_config.get("max_results", 5),
+                }
+
+            return raw_config
 
     def _build_default_params_template(
         self,

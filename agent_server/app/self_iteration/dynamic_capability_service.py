@@ -34,7 +34,7 @@ class DynamicCapabilityService:
 
         steps = dynamic_plan.get("steps", [])
         tool_results: list[dict] = []
-
+        print("in dynamic excutor")
         for step in steps:
             step_type = step.get("type")
 

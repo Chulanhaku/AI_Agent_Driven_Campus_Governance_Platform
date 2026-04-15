@@ -18,6 +18,8 @@ class CapabilityDetector:
             "怎么预约",
             "怎么导出",
             "想缴",
+            "想查",
+            "想申请",
         ]
         if any(keyword in normalized for keyword in strong_keywords):
             return True

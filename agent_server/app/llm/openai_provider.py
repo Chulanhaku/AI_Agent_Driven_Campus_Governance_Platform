@@ -37,6 +37,7 @@ class OpenAiProvider(BaseLlmProvider):
         secondary_intent_lines = "\n".join(
             [f"- {item}" for item in (supported_secondary_intents or [])]
         )
+        print("Supported Primary Intents:", primary_intent_lines)
         prompt = f"""
 你是一个校园事务 Agent 的请求解析器。
 请从用户输入中提取：
@@ -452,58 +453,217 @@ class OpenAiProvider(BaseLlmProvider):
         memory_summary: str | None,
     ) -> dict:
         prompt = f"""
-你是一个校园事务 Agent 的能力设计器。
-当前系统在处理用户请求时进入了 fallback，现在需要生成一条“能力提案”。
+    你是一个校园事务 Agent 的能力设计器。
+    当前系统在处理用户请求时进入了 fallback，现在需要生成一条“能力提案”。
 
-请只输出 JSON，不要输出任何额外文字。
+    请只输出 JSON，不要输出任何额外文字。
 
-提案类型仅允许：
-- knowledge_patch
-- plan_patch
-- tool_spec
+    提案类型仅允许：
+    - knowledge_patch
+    - plan_patch
+    - tool_spec
 
-要求：
-1. 如果只是已有能力的表达方式扩展，优先输出 knowledge_patch
-2. 如果可以基于现有工具和 planner 扩展实现，输出 plan_patch
-3. 如果确实需要新工具，输出 tool_spec
-4. 不要编造数据库表名
-5. 不要输出 Python 代码，只输出结构化提案
-6. capability_name 使用 snake_case
-7. 额外输出：
-   - confidence_score: 0~1 之间的小数
-   - risk_level: low / medium / high
+    总要求：
+    1. 如果只是已有能力的表达方式扩展，优先输出 knowledge_patch
+    2. 如果可以基于现有工具和 planner 扩展实现，输出 plan_patch
+    3. 如果确实需要新工具，输出 tool_spec
+    4. 不要编造数据库表名、字段名、网页域名
+    5. 不要输出 Python 代码，只输出结构化提案
+    6. capability_name 使用 snake_case
+    7. 额外输出：
+    - confidence_score: 0~1 之间的小数
+    - risk_level: low / medium / high
 
-用户消息：
-{user_message}
+    如果输出 tool_spec，必须遵守以下强制规则：
+    1. 必须输出：
+    - execution_mode
+    - execution_config
+    2. execution_mode 仅允许：
+    - db_query
+    - web_search
+    3. 如果 data_sources 包含 db_search，且 research_summary 中可以找到匹配表结构，优先输出 db_query
+    4. 如果数据库中找不到合适表，才输出 web_search
+    5. db_query 类型必须包含：
+    - execution_config.table_name
+    - execution_config.allowed_columns
+    - execution_config.keyword_param
+    - execution_config.default_limit
+    - execution_config.exact_filters
+    6. web_search 类型必须包含：
+    - execution_config.query_param
+    - execution_config.max_results
+    7. 如果无法确定 execution_config，就不要输出 tool_spec，改为输出 plan_patch 或 knowledge_patch
+    8. allowed_columns 只能使用 research_summary.schema_findings 中真实存在的字段
+    9. table_name 只能使用 research_summary.schema_findings 中真实存在的表
+    10. exact_filters 的格式必须是：
+    {{
+        "输入参数名": "数据库字段名"
+    }}
 
-会话摘要：
-{memory_summary or "无"}
+    tool_spec 输出规则补充：
+    - inputs 只放用户真正需要提供或系统需要提取的输入参数
+    - 如果可以从当前用户上下文自动获得 user_id，也可以保留在 inputs 中
+    - 如果是 db_query 且当前动态执行器只支持单表查询，就不要设计必须依赖 join 的复杂能力
+    - 对于第一版难以单表执行的需求，宁可收缩能力范围，也不要输出不可执行配置
 
-research_summary：
-{research_summary}
+    用户消息：
+    {user_message}
 
-输出示例：
-{{
-  "proposal_type": "tool_spec",
-  "capability_name": "query_shuttle_schedule",
-  "needs_new_tool": true,
-  "intent_aliases": ["校车时刻表", "班车时间"],
-  "planner_patch": null,
-  "tool_spec": {{
-    "name": "query_shuttle_schedule",
-    "description": "查询校车时刻表",
-    "inputs": {{
-      "campus": "string|null",
-      "date": "string|null"
+    会话摘要：
+    {memory_summary or "无"}
+
+    research_summary：
+    {research_summary}
+
+    knowledge_patch 示例：
+    {{
+    "proposal_type": "knowledge_patch",
+    "capability_name": "alias_shuttle_bus_query",
+    "target_intent": "query_shuttle_schedule",
+    "intent_aliases": ["校车情况", "班车情况", "校车时刻表"],
+    "reason": "这些表达都指向校车查询能力",
+    "confidence_score": 0.91,
+    "risk_level": "low"
+    }}
+
+    plan_patch 示例：
+    {{
+    "proposal_type": "plan_patch",
+    "capability_name": "patch_schedule_with_busyness_analysis",
+    "planner_patch": {{
+        "primary_intent": "query_schedule",
+        "steps": [
+        {{
+            "type": "call_tool",
+            "tool_name": "query_my_schedule",
+            "params": {{
+            "user_id": "$CURRENT_USER_ID",
+            "semester": null,
+            "weekday": null
+            }}
+        }},
+        {{
+            "type": "reason",
+            "goal": "weekly_busyness_analysis"
+        }},
+        {{
+            "type": "compose"
+        }}
+        ]
     }},
-    "read_only": true,
-    "data_sources": ["web_research", "db_search"]
-  }},
-  "reason": "用户需要查询校车时刻表，当前系统缺少该能力",
-  "confidence_score": 0.82,
-  "risk_level": "medium"
-}}
-""".strip()
+    "reason": "在已有课表查询基础上补充忙碌度分析",
+    "confidence_score": 0.86,
+    "risk_level": "medium"
+    }}
+
+    tool_spec 示例1（db_query）：
+    {{
+    "proposal_type": "tool_spec",
+    "capability_name": "query_dorm_electricity_balance",
+    "needs_new_tool": true,
+    "intent_aliases": ["查寝室电费", "宿舍电量查询", "剩余电费", "寝室余额"],
+    "planner_patch": null,
+    "tool_spec": {{
+        "name": "query_dorm_electricity_balance",
+        "description": "查询指定寝室的电费余额及账户信息",
+        "inputs": {{
+        "room_id": "integer|null"
+        }},
+        "read_only": true,
+        "data_sources": ["db_search"],
+        "execution_mode": "db_query",
+        "execution_config": {{
+        "table_name": "dorm_utility_accounts",
+        "allowed_columns": [
+            "id",
+            "room_id",
+            "utility_type",
+            "account_no",
+            "current_balance",
+            "unit_price",
+            "status"
+        ],
+        "keyword_param": null,
+        "default_limit": 5,
+        "exact_filters": {{
+            "room_id": "room_id"
+        }}
+        }}
+    }},
+    "reason": "数据库中存在 dorm_utility_accounts，可单表查询寝室电费余额",
+    "confidence_score": 0.93,
+    "risk_level": "medium"
+    }}
+
+    tool_spec 示例2（db_query）：
+    {{
+    "proposal_type": "tool_spec",
+    "capability_name": "query_shuttle_schedule",
+    "needs_new_tool": true,
+    "intent_aliases": ["校车情况", "班车情况", "校车时刻表"],
+    "planner_patch": null,
+    "tool_spec": {{
+        "name": "query_shuttle_schedule",
+        "description": "查询指定日期的校车班次信息",
+        "inputs": {{
+        "date": "string|null"
+        }},
+        "read_only": true,
+        "data_sources": ["db_search"],
+        "execution_mode": "db_query",
+        "execution_config": {{
+        "table_name": "shuttle_schedules",
+        "allowed_columns": [
+            "id",
+            "route_id",
+            "service_date",
+            "depart_time",
+            "arrive_time",
+            "service_day_type",
+            "vehicle_no",
+            "status",
+            "remark"
+        ],
+        "keyword_param": null,
+        "default_limit": 10,
+        "exact_filters": {{
+            "date": "service_date"
+        }}
+        }}
+    }},
+    "reason": "数据库中存在 shuttle_schedules，可先实现按日期查询校车班次",
+    "confidence_score": 0.9,
+    "risk_level": "medium"
+    }}
+
+    tool_spec 示例3（web_search）：
+    {{
+    "proposal_type": "tool_spec",
+    "capability_name": "query_school_bus_notice",
+    "needs_new_tool": true,
+    "intent_aliases": ["校车公告", "班车公告"],
+    "planner_patch": null,
+    "tool_spec": {{
+        "name": "query_school_bus_notice",
+        "description": "搜索学校官网上的校车公告",
+        "inputs": {{
+        "keyword": "string|null"
+        }},
+        "read_only": true,
+        "data_sources": ["web_research"],
+        "execution_mode": "web_search",
+        "execution_config": {{
+        "query_param": "keyword",
+        "max_results": 5
+        }}
+    }},
+    "reason": "数据库无合适表时，可退化为官网搜索",
+    "confidence_score": 0.72,
+    "risk_level": "medium"
+    }}
+
+    现在请根据用户消息和 research_summary，输出唯一一个最合适的 JSON 提案。
+    """.strip()
 
         content = self._chat(prompt)
         return self.output_parser.parse_json(content)
