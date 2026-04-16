@@ -140,4 +140,37 @@ class ResponseFormatter:
                 f"签到截止：{result['check_in_deadline']}\n"
                 f"状态：{result['status']}"
             )
+        
+        if intent == "zero_form_approval_generate" and result.get("success"):
+            missing_fields = result.get("missing_fields", [])
+            form_data = result.get("form_data", {})
+            approver_name = result.get("approver_name")
+
+            lines = [
+                f"我已经为你生成了 {result['template_name']} 的审批草稿。",
+                f"审批人：{approver_name or '暂未匹配到审批人'}",
+                f"表单内容：{form_data}",
+            ]
+
+            if missing_fields:
+                lines.append(f"当前还缺少字段：{', '.join(missing_fields)}")
+            else:
+                lines.append("当前表单信息已基本完整，你可以继续确认提交。")
+
+            return "\n".join(lines)
+
+        if intent == "zero_form_approval_submit" and result.get("requires_confirmation"):
+            return (
+                f"即将提交 {result['approval_type']} 审批申请。\n"
+                f"请确认本次操作。待确认动作 ID：{result['action_id']}"
+            )
+
+        if intent == "zero_form_approval_submit" and result.get("success"):
+            return (
+                f"审批申请提交成功。\n"
+                f"审批单号：{result['request_id']}\n"
+                f"审批类型：{result['approval_type']}\n"
+                f"审批人 ID：{result['approver_user_id']}\n"
+                f"状态：{result['status']}"
+            )
         return "当前没有可用的工具结果摘要。"

@@ -1,10 +1,16 @@
+from app.self_iteration.capability_registry import CapabilityRegistry
 from app.agent.plan_schema import ExecutionPlanSchema
 from app.llm.base import BaseLlmProvider
 
 
 class Planner:
-    def __init__(self, llm_provider: BaseLlmProvider | None = None) -> None:
+    def __init__(
+        self,
+        llm_provider: BaseLlmProvider | None = None,
+        capability_registry: CapabilityRegistry | None = None,
+    ) -> None:
         self.llm_provider = llm_provider
+        self.capability_registry = capability_registry
 
     def build_plan(
         self,
@@ -13,6 +19,15 @@ class Planner:
         context: dict,
         use_llm_planner: bool = False,
     ) -> dict:
+        if self.capability_registry is not None:
+            patched = self.capability_registry.get_plan_patch_for_intent(
+                primary_intent=intent,
+            )
+            if patched is not None:
+                return {
+                    "plan_type": "multi_step",
+                    "steps": patched.get("steps", []),
+                }
         if use_llm_planner and self.llm_provider is not None:
             llm_plan = self._build_plan_by_llm(intent=intent, context=context)
             if llm_plan is not None:
@@ -195,6 +210,42 @@ class Planner:
                             "user_id": context["current_user"]["id"],
                             "session_id": context["session_id"],
                             "selected_resource_index": context.get("selected_resource_index"),
+                        },
+                    }
+                ],
+            }
+        
+        if intent == "zero_form_approval_generate":
+            return {
+                "plan_type": "multi_step",
+                "steps": [
+                    {
+                        "type": "call_tool",
+                        "tool_name": "generate_zero_form_approval",
+                        "params": {
+                            "current_user_id": context["current_user_obj"].id,
+                            "approval_type": context.get("approval_type"),
+                            "parsed_fields": {
+                                "reason": context.get("approval_reason"),
+                                "start_date": context.get("approval_start_date"),
+                                "end_date": context.get("approval_end_date"),
+                            },
+                        },
+                    },
+                    {
+                        "type": "compose",
+                    },
+                ],
+            }
+
+        if intent == "zero_form_approval_submit":
+            return {
+                "plan_type": "workflow",
+                "steps": [
+                    {
+                        "type": "create_pending_zero_form_approval_submit",
+                        "params": {
+                            "session_id": context["session_id"],
                         },
                     }
                 ],

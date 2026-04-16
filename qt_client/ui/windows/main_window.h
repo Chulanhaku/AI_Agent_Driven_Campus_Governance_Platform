@@ -1,32 +1,19 @@
 #pragma once
 
 #include <QMainWindow>
+#include "creeper-qt/layout/stacked.hh"
 
-class AppContext;
 
-namespace Ui {
-class MainWindow;
-}
-
-class MainWindow : public QMainWindow
+class main_window : public QMainWindow
 {
     Q_OBJECT
 
 public:
-    explicit MainWindow(AppContext* context,QWidget *parent = nullptr);
-    ~MainWindow();
-
-private slots:
-
-    void on_dashboard_clicked();
-    void on_chat_clicked();
-    void on_schedule_clicked();
-    void on_leave_clicked();
-    void on_card_clicked();
+    explicit main_window(QWidget* parent = nullptr);
 
 private:
+    creeper::Stacked* page_stack_ = nullptr;
 
-    Ui::MainWindow *ui;
-
-    AppContext* context;
+    void build_ui();
+    QWidget* build_placeholder_page(const QString& title, const QString& description);
 };

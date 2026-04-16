@@ -8,6 +8,8 @@ class BaseLlmProvider(ABC):
         *,
         message: str,
         recent_messages_text: str | None = None,
+        supported_primary_intents: list[str] | None = None,
+        supported_secondary_intents: list[str] | None = None,
     ) -> dict:
         raise NotImplementedError
 
@@ -15,14 +17,16 @@ class BaseLlmProvider(ABC):
     def extract_slots(self, *, intent: str, message: str) -> dict:
         raise NotImplementedError
     
-    # @abstractmethod
-    # def parse_user_request(
-    #     self,
-    #     *,
-    #     message: str,
-    #     memory_summary: str | None = None,
-    # ) -> dict:
-    #     raise NotImplementedError
+    @abstractmethod
+    def parse_user_request(
+        self,
+        *,
+        message: str,
+        memory_summary: str | None = None,
+        supported_primary_intents: list[str] | None = None,
+        supported_secondary_intents: list[str] | None = None,
+    ) -> dict:
+        raise NotImplementedError
 
     @abstractmethod
     def generate_fallback_reply(self, *, user_name: str, message: str) -> str:
@@ -72,6 +76,28 @@ class BaseLlmProvider(ABC):
         available_tools: list[str],
         primary_intent: str,
         secondary_intents: list[str],
+        memory_summary: str | None,
+    ) -> dict:
+        raise NotImplementedError
+    
+    @abstractmethod
+    def generate_capability_proposal(
+        self,
+        *,
+        user_message: str,
+        research_summary: dict,
+        memory_summary: str | None,
+    ) -> dict:
+        raise NotImplementedError
+    
+
+    @abstractmethod
+    def extract_dynamic_slots(
+        self,
+        *,
+        user_message: str,
+        primary_intent: str,
+        input_schema_json: dict,
         memory_summary: str | None,
     ) -> dict:
         raise NotImplementedError

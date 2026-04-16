@@ -11,7 +11,9 @@ from app.rag.rag_service import RagService
 from app.rag.retriever import Retriever
 from app.security.jwt_handler import decode_access_token
 from app.services.user_service import UserService
-
+from app.self_iteration.capability_registry import CapabilityRegistry
+from app.self_iteration.dynamic_tool_registry import DynamicToolRegistry
+from app.self_iteration.dynamic_plan_registry import DynamicPlanRegistry
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -51,6 +53,11 @@ def get_retriever(
     rag_service: RagService = Depends(get_rag_service),
 ) -> Retriever:
     return rag_service.get_retriever()
+
+def get_capability_registry(
+    container: AppContainer = Depends(get_app_container),
+) -> CapabilityRegistry:
+    return container.capability_registry
 
 
 def get_current_user(
@@ -94,3 +101,15 @@ def get_current_user(
         )
 
     return user
+
+
+def get_dynamic_tool_registry(
+    container: AppContainer = Depends(get_app_container),
+) -> DynamicToolRegistry:
+    return container.dynamic_tool_registry
+
+
+def get_dynamic_plan_registry(
+    container: AppContainer = Depends(get_app_container),
+) -> DynamicPlanRegistry:
+    return container.dynamic_plan_registry

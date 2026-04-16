@@ -40,6 +40,25 @@ from app.db.repositories.resource_booking_repository import ResourceBookingRepos
 from app.db.repositories.resource_repository import ResourceRepository
 from app.services.resource_booking_service import ResourceBookingService
 from app.services.resource_service import ResourceService
+from app.db.repositories.notification_repository import NotificationRepository
+from app.services.notification_service import NotificationService
+from app.db.repositories.approval_request_repository import ApprovalRequestRepository
+from app.db.repositories.approval_template_repository import ApprovalTemplateRepository
+from app.services.zero_form_approval_service import ZeroFormApprovalService
+from app.db.repositories.user_repository import UserRepository
+from app.db.repositories.capability_proposal_repository import CapabilityProposalRepository
+from app.self_iteration.capability_detector import CapabilityDetector
+from app.self_iteration.capability_designer import CapabilityDesigner
+from app.self_iteration.capability_researcher import CapabilityResearcher
+from app.self_iteration.capability_service import CapabilityService
+from app.tools.web_research_tool import WebResearchTool
+from app.tools.db_schema_search_tool import DbSchemaSearchTool
+from app.tools.db_data_search_tool import DbDataSearchTool
+from app.api.deps import get_capability_registry,get_dynamic_tool_registry,get_dynamic_plan_registry
+from app.self_iteration.capability_validator import CapabilityValidator
+from app.self_iteration.capability_loader import CapabilityLoader
+from app.self_iteration.capability_registry import CapabilityRegistry
+from app.self_iteration.capability_policy import CapabilityPolicy
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -48,6 +67,9 @@ def get_agent_session_service(
     db: Session = Depends(get_db_dep),
     llm_provider: BaseLlmProvider = Depends(get_llm_provider),
     retriever: Retriever = Depends(get_retriever),
+    capability_registry :CapabilityRegistry = Depends(get_capability_registry),
+    dynamic_tool_registry=Depends(get_dynamic_tool_registry),
+    dynamic_plan_registry=Depends(get_dynamic_plan_registry),
 ) -> AgentSessionService:
     settings = get_settings()
 
@@ -66,6 +88,8 @@ def get_agent_session_service(
     resource_repository = ResourceRepository(db)
     resource_booking_repository = ResourceBookingRepository(db)
     integrity_score_repository = IntegrityScoreRepository(db)
+    approval_request_repository = ApprovalRequestRepository(db)
+    approval_template_repository = ApprovalTemplateRepository(db)
 
     schedule_service = ScheduleService(schedule_repository)
     campus_card_service = CampusCardService(campus_card_repository)
@@ -84,10 +108,48 @@ def get_agent_session_service(
         course_enrollment_repository=course_enrollment_repository,
     )
     resource_service = ResourceService(resource_repository)
+
+    notification_repository = NotificationRepository(db)
+    notification_service = NotificationService(notification_repository)
     resource_booking_service = ResourceBookingService(
         resource_booking_repository=resource_booking_repository,
         integrity_score_repository=integrity_score_repository,
+        notification_service=notification_service,
     )
+    zero_form_approval_service = ZeroFormApprovalService(
+        approval_template_repository=approval_template_repository,
+        approval_request_repository=approval_request_repository,
+        user_repository=UserRepository(db),
+        notification_service=notification_service,
+    )
+    
+    web_research_tool = WebResearchTool()
+    db_schema_search_tool = DbSchemaSearchTool(db)
+    db_data_search_tool = DbDataSearchTool(db)
+
+    capability_validator = CapabilityValidator()
+    capability_loader = CapabilityLoader(capability_registry)
+
+    capability_proposal_repository = CapabilityProposalRepository(db)
+    capability_detector = CapabilityDetector()
+    capability_researcher = CapabilityResearcher(
+        web_research_tool=web_research_tool,
+        db_schema_search_tool=db_schema_search_tool,
+        db_data_search_tool=db_data_search_tool,
+    )
+    capability_designer = CapabilityDesigner(llm_provider)
+    capability_policy = CapabilityPolicy()
+    capability_service = CapabilityService(
+        capability_proposal_repository=capability_proposal_repository,
+        capability_detector=capability_detector,
+        capability_researcher=capability_researcher,
+        capability_designer=capability_designer,
+        capability_validator=capability_validator,
+        capability_loader=capability_loader,
+        capability_policy=capability_policy,
+
+    )
+
 
     return AgentSessionService(
         agent_session_repository=agent_session_repository,
@@ -105,6 +167,12 @@ def get_agent_session_service(
         course_enrollment_service=course_enrollment_service,
         resource_service=resource_service,
         resource_booking_service=resource_booking_service,
+        zero_form_approval_service=zero_form_approval_service,
+        capability_service=capability_service,
+        capability_registry=capability_registry,
+        db_session=db,
+        dynamic_tool_registry=dynamic_tool_registry,
+        dynamic_plan_registry=dynamic_plan_registry,
     )
 
 def get_tool_execution_log_service(

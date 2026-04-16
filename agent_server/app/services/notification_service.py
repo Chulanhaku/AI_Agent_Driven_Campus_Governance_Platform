@@ -39,6 +39,20 @@ class NotificationService:
             self.notification_repository.rollback()
             raise
 
+    def create_notification_from_payload(
+        self,
+        *,
+        payload: dict,
+    ) -> dict:
+        return self.create_notification(
+            user_id=payload["user_id"],
+            title=payload["title"],
+            content=payload["content"],
+            notification_type=payload["notification_type"],
+            related_type=payload.get("related_type"),
+            related_id=payload.get("related_id"),
+        )
+
     def list_my_notifications(
         self,
         *,
@@ -94,6 +108,29 @@ class NotificationService:
             self.notification_repository.rollback()
             raise
 
+    def build_resource_booking_confirmed_payload(
+        self,
+        *,
+        user_id: int,
+        booking_id: int,
+        resource_name: str,
+        start_time: str,
+        end_time: str,
+        check_in_deadline: str | None,
+    ) -> dict:
+        return {
+            "user_id": user_id,
+            "title": "资源预约成功",
+            "content": (
+                f"你已成功预约资源：{resource_name}。"
+                f"预约单号：{booking_id}；开始时间：{start_time}；结束时间：{end_time}。"
+                f"{'签到截止：' + check_in_deadline + '。' if check_in_deadline else ''}"
+            ),
+            "notification_type": "resource_booking_confirmed",
+            "related_type": "resource_booking",
+            "related_id": booking_id,
+        }
+
     def build_no_show_notification_payload(
         self,
         *,
@@ -112,4 +149,45 @@ class NotificationService:
             "notification_type": "resource_booking_no_show",
             "related_type": "resource_booking",
             "related_id": booking_id,
+        }
+        
+    def build_zero_form_submitted_to_approver_payload(
+        self,
+        *,
+        approver_user_id: int,
+        request_id: int,
+        approval_type: str,
+        applicant_name: str,
+    ) -> dict:
+        return {
+            "user_id": approver_user_id,
+            "title": "新的审批申请待处理",
+            "content": (
+                f"{applicant_name} 提交了一条 {approval_type} 审批申请，"
+                f"审批单号：{request_id}，请及时处理。"
+            ),
+            "notification_type": "zero_form_approval_pending",
+            "related_type": "zero_form_approval_request",
+            "related_id": request_id,
+        }
+
+    def build_zero_form_result_to_applicant_payload(
+        self,
+        *,
+        applicant_user_id: int,
+        request_id: int,
+        approval_type: str,
+        status: str,
+    ) -> dict:
+        status_text = "已通过" if status == "approved" else "已驳回"
+        return {
+            "user_id": applicant_user_id,
+            "title": "审批结果通知",
+            "content": (
+                f"你的 {approval_type} 审批申请已处理，"
+                f"审批单号：{request_id}，当前结果：{status_text}。"
+            ),
+            "notification_type": "zero_form_approval_result",
+            "related_type": "zero_form_approval_request",
+            "related_id": request_id,
         }

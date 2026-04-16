@@ -35,7 +35,15 @@ from app.services.resource_booking_service import ResourceBookingService
 from app.services.resource_service import ResourceService
 from app.tools.resource_booking_tools import QueryAvailableResourcesTool, SubmitResourceBookingTool
 from app.workflows.resource_booking_workflow import ResourceBookingWorkflow
-
+from app.utils.semester_utils import SemesterUtils
+from app.services.zero_form_approval_service import ZeroFormApprovalService
+from app.tools.zero_form_approval_tools import GenerateZeroFormApprovalTool, SubmitZeroFormApprovalTool
+from app.workflows.zero_form_approval_workflow import ZeroFormApprovalWorkflow
+from app.self_iteration.capability_service import CapabilityService
+from app.self_iteration.capability_registry import CapabilityRegistry
+from app.self_iteration.dynamic_tool_executor import DynamicToolExecutor
+from app.self_iteration.dynamic_capability_service import DynamicCapabilityService
+from app.agent.dynamic_slot_extractor import DynamicSlotExtractor
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +66,12 @@ class AgentSessionService:
         course_enrollment_service: CourseEnrollmentService,
         resource_service: ResourceService,
         resource_booking_service: ResourceBookingService,
+        zero_form_approval_service: ZeroFormApprovalService,
+        capability_service: CapabilityService,
+        capability_registry: CapabilityRegistry,
+        db_session,
+        dynamic_tool_registry,
+        dynamic_plan_registry,
     ) -> None:
         self.agent_session_repository = agent_session_repository
         self.pending_action_repository = pending_action_repository
@@ -69,10 +83,25 @@ class AgentSessionService:
         self.llm_provider = llm_provider
         self.retriever = retriever
         self.rag_top_k = rag_top_k
-
-        self.router = AgentRouter(llm_provider=llm_provider)
+        self.dynamic_slot_extractor = DynamicSlotExtractor()
+#
+        self.capability_registry = capability_registry
+        self.router = AgentRouter(
+            llm_provider=llm_provider,
+            capability_registry=capability_registry,
+            dynamic_plan_registry=dynamic_plan_registry,
+        )
+        self.planner = Planner(
+            llm_provider=llm_provider,
+            capability_registry=capability_registry,
+        )
+        self.db_session = db_session
+        self.dynamic_tool_registry = dynamic_tool_registry
+        self.dynamic_plan_registry = dynamic_plan_registry
+#
+        #self.router = AgentRouter(llm_provider=llm_provider)
         self.context_builder = ContextBuilder()
-        self.planner = Planner(llm_provider=llm_provider)
+        #self.planner = Planner(llm_provider=llm_provider)
         self.executor = Executor()
         self.response_formatter = ResponseFormatter()
         self.prompt_manager = PromptManager()
@@ -88,6 +117,19 @@ class AgentSessionService:
 
         self.resource_service = resource_service
         self.resource_booking_service = resource_booking_service
+
+        self.zero_form_approval_service = zero_form_approval_service
+        
+        self.capability_service = capability_service
+
+        dynamic_tool_executor = DynamicToolExecutor(db_session)
+        self.dynamic_capability_service = DynamicCapabilityService(
+            dynamic_plan_registry=dynamic_plan_registry,
+            dynamic_tool_registry=dynamic_tool_registry,
+            dynamic_tool_executor=dynamic_tool_executor,
+            response_composer=self.response_composer,
+        )
+        
 
     def get_user_session(self, session_id: int, user_id: int) -> AgentSession | None:
         return self.agent_session_repository.get_session_by_id_and_user_id(
@@ -463,6 +505,65 @@ class AgentSessionService:
                         "result": result,
                     },
                 )
+            elif action.action_type == "zero_form_approval_submit":
+                approval_type = str(action.payload_json["approval_type"])
+                template_id = int(action.payload_json["template_id"])
+                approver_user_id = action.payload_json.get("approver_user_id")
+                form_data = dict(action.payload_json["form_data"])
+
+                tool = SubmitZeroFormApprovalTool(self.zero_form_approval_service)
+
+                tool_log = self.tool_execution_log_service.start_log(
+                    session_id=session.id,
+                    tool_name=tool.name,
+                    input_json={
+                        "current_user_id": current_user.id,
+                        "approval_type": approval_type,
+                        "template_id": template_id,
+                        "approver_user_id": approver_user_id,
+                        "form_data": form_data,
+                    },
+                )
+
+                try:
+                    result = tool.run(
+                        current_user=current_user,
+                        approval_type=approval_type,
+                        template_id=template_id,
+                        approver_user_id=approver_user_id,
+                        form_data=form_data,
+                    )
+                    self.tool_execution_log_service.finish_log(
+                        log=tool_log,
+                        output_json=result,
+                        status="success",
+                    )
+                except Exception as exc:
+                    self.tool_execution_log_service.finish_log(
+                        log=tool_log,
+                        output_json={"error": str(exc)},
+                        status="failed",
+                    )
+                    raise
+
+                self.pending_action_repository.update_status(action=action, status="approved")
+
+                assistant_text = self.response_formatter.format(
+                    intent="zero_form_approval_submit",
+                    result=result,
+                )
+
+                self.audit_service.record(
+                    user_id=current_user.id,
+                    action="zero_form_approval.submit",
+                    target_type="pending_action",
+                    target_id=action.id,
+                    detail_json={
+                        "approval_type": approval_type,
+                        "session_id": session.id,
+                        "result": result,
+                    },
+                )
             else:
                 raise ValueError(f"Unsupported action type: {action.action_type}")
 
@@ -492,12 +593,17 @@ class AgentSessionService:
         rag_tool = QueryPolicyKnowledgeTool(self.retriever, top_k=self.rag_top_k)
         course_plan_tool = GenerateCoursePlanTool(self.course_plan_service)
         resource_query_tool = QueryAvailableResourcesTool(self.resource_service)
+        zero_form_generate_tool = GenerateZeroFormApprovalTool(self.zero_form_approval_service)
+        zero_form_submit_tool = SubmitZeroFormApprovalTool(self.zero_form_approval_service)
 
+
+        tool_registry.register(zero_form_generate_tool)
         tool_registry.register(schedule_tool)
         tool_registry.register(balance_tool)
         tool_registry.register(rag_tool)
         tool_registry.register(course_plan_tool)
         tool_registry.register(resource_query_tool)
+        tool_registry.register(zero_form_submit_tool)
 
         persisted_memory_obj = self.agent_memory_service.get_session_memory(session_id)
         persisted_memory = None
@@ -516,40 +622,349 @@ class AgentSessionService:
         )
         slot_memory = memory_context.get("slot_memory", {})
 
-        intent = self.router.detect_intent(
+        # intent = self.router.detect_intent(
+        #     message=user_message,
+        #     memory_context=memory_context,
+        # )
+        # secondary_intents = self.router.detect_secondary_intents(user_message)
+
+        # amount = self.router.extract_amount(user_message)
+        # leave_days = self.router.extract_leave_days(user_message)
+        # leave_reason = self.router.extract_leave_reason(user_message)
+        # selected_plan_index = self.router.extract_selected_plan_index(user_message)
+
+        # explicit_resource_type = self.router.extract_resource_type(user_message)
+        # booking_time_range = self.router.extract_booking_time_range(user_message)
+        # selected_resource_index = self.router.extract_candidate_index(user_message)
+
+#version1
+        # parsed_request = self.router.parse_request(
+        #     message=user_message,
+        #     memory_summary=memory_context.get("summary_text"),
+        # )
+
+        # intent = parsed_request["primary_intent"]
+        # secondary_intents = parsed_request["secondary_intents"]
+        # print("Parsed intent:", intent)
+        # print("Parsed secondary intents:", secondary_intents)
+        # parsed_slots = parsed_request["slots"]
+
+        # amount = parsed_slots.get("amount")
+        # leave_days = parsed_slots.get("leave_days")
+        # leave_reason = parsed_slots.get("leave_reason")
+
+        # explicit_semester = parsed_slots.get("semester")
+        # explicit_resource_type = parsed_slots.get("resource_type")
+        # resolved_selected_resource_index_from_parse = parsed_slots.get("selected_resource_index")
+        # selected_resource_index = resolved_selected_resource_index_from_parse
+        # print("Parsed out:", selected_resource_index)
+        # selected_plan_index_from_parse = parsed_slots.get("selected_plan_index")
+        # selected_plan_index = selected_plan_index_from_parse
+        # parsed_booking_start_time = parsed_slots.get("booking_start_time")
+        # parsed_booking_end_time = parsed_slots.get("booking_end_time")
+
+        # approval_type = parsed_slots.get("approval_type")
+        # approval_reason = parsed_slots.get("approval_reason")
+        # approval_start_date = parsed_slots.get("start_date")
+        # approval_end_date = parsed_slots.get("end_date")
+
+
+        # slot_memory = memory_context.get("slot_memory", {})
+
+        # memory_semester = slot_memory.get("semester")
+        # resolved_semester = (
+        #     explicit_semester
+        #     or memory_semester
+        #     or SemesterUtils.get_current_semester()
+        # )
+
+        # resource_booking_memory = slot_memory.get("resource_booking", {})
+        # resolved_resource_type = (
+        #     explicit_resource_type
+        #     or resource_booking_memory.get("resource_type")
+        # )
+
+        # resolved_booking_start_time = (
+        #     parsed_booking_start_time
+        #     or resource_booking_memory.get("start_time")
+        # )
+        # resolved_booking_end_time = (
+        #     parsed_booking_end_time
+        #     or resource_booking_memory.get("end_time")
+        # )
+
+        # resolved_selected_resource_index = (
+        #     resolved_selected_resource_index_from_parse
+        #     or resource_booking_memory.get("selected_resource_index")
+        # )
+        # print("After resolving, selected_resource_index:", resolved_selected_resource_index)
+        # course_plan_memory = slot_memory.get("course_plan_generate", {})
+        # resolved_selected_plan_index = (
+        #     selected_plan_index_from_parse
+        #     or course_plan_memory.get("selected_plan_index")
+        # )
+
+        # zero_form_memory = slot_memory.get("zero_form_approval", {})
+        # resolved_approval_type = approval_type or zero_form_memory.get("approval_type")
+        # resolved_approval_reason = approval_reason or zero_form_memory.get("approval_reason")
+        # resolved_approval_start_date = approval_start_date or zero_form_memory.get("start_date")
+        # resolved_approval_end_date = approval_end_date or zero_form_memory.get("end_date")
+
+
+        # self.audit_service.record(
+        #     user_id=current_user.id,
+        #     action="agent.request.parsed",
+        #     target_type="agent_session",
+        #     target_id=session_id,
+        #     detail_json={
+        #         "user_message": user_message,
+        #         "parsed_request": parsed_request,
+        #     },
+        # )
+        # # plan to change position
+        # # resource_booking_memory = memory_context.get("slot_memory", {}).get("resource_booking", {})
+
+        # # resolved_resource_type = (
+        # #     explicit_resource_type
+        # #     or resource_booking_memory.get("resource_type")
+        # # )
+
+        # # resolved_booking_start_time = (
+        # #     booking_time_range[0] if booking_time_range else resource_booking_memory.get("start_time")
+        # # )
+        # # resolved_booking_end_time = (
+        # #     booking_time_range[1] if booking_time_range else resource_booking_memory.get("end_time")
+        # # )
+
+        # # resolved_selected_resource_index = (
+        # #     selected_resource_index
+        # #     or resource_booking_memory.get("selected_resource_index")
+        # # )
+
+        # if intent == "fallback":
+        #     pending_intent = slot_memory.get("pending_intent")
+        #     if pending_intent in {
+        #         "campus_card_topup",
+        #         "leave_create",
+        #         "query_schedule",
+        #         "course_plan_submit",
+        #         "resource_booking_submit",
+        #     }:
+        #         intent = pending_intent
+
+        # if not amount:
+        #     amount = (
+        #         slot_memory.get("campus_card_topup", {})
+        #         .get("amount")
+        #     )
+
+        # if not leave_days:
+        #     leave_days = (
+        #         slot_memory.get("leave_create", {})
+        #         .get("days")
+        #     )
+
+        # if not leave_reason:
+        #     leave_reason = (
+        #         slot_memory.get("leave_create", {})
+        #         .get("reason")
+        #     )
+
+        # llm_slots = {}
+        # if (
+        #     (intent == "campus_card_topup" and not amount)
+        #     or (intent == "leave_create" and (not leave_days or not leave_reason))
+        #     or (intent == "course_plan_submit" and not selected_plan_index)
+        #     or (intent == "resource_booking_submit" and not selected_resource_index)
+        #     or (intent == "zero_form_approval_generate" and not approval_type)
+        # ):
+        #     llm_slots = self.router.extract_slots_with_llm(intent=intent, message=user_message)
+        # if intent == "course_plan_submit" and not selected_plan_index:
+        #     selected_plan_index = llm_slots.get("selected_plan_index")
+        # print("LLM extracted slots:", llm_slots)
+        # if intent == "campus_card_topup" and not amount:
+        #     amount = llm_slots.get("amount")
+
+        # if intent == "resource_booking_generate":
+        #     if not explicit_resource_type:
+        #         explicit_resource_type = llm_slots.get("resource_type")
+
+        #     if not parsed_booking_start_time:
+        #         parsed_booking_start_time = llm_slots.get("booking_start_time")
+
+        #     if not parsed_booking_end_time:
+        #         parsed_booking_end_time = llm_slots.get("booking_end_time")
+
+        # if intent == "resource_booking_submit":
+        #     if not resolved_selected_resource_index_from_parse:
+        #         resolved_selected_resource_index = llm_slots.get("selected_resource_index")
+        #         print("LLM extracted selected_resource_index:", resolved_selected_resource_index)
+        #     if not parsed_booking_start_time:
+        #         parsed_booking_start_time = llm_slots.get("booking_start_time")
+
+        #     if not parsed_booking_end_time:
+        #         parsed_booking_end_time = llm_slots.get("booking_end_time")
+
+        # if intent == "leave_create":
+        #     if not leave_days:
+        #         leave_days = llm_slots.get("days")
+        #     if not leave_reason:
+        #         leave_reason = llm_slots.get("reason")
+
+        # if intent == "zero_form_approval_generate":
+        #     if not approval_type:
+        #         approval_type = llm_slots.get("approval_type")
+        #     if not approval_reason:
+        #         approval_reason = llm_slots.get("reason")
+        #     if not approval_start_date:
+        #         approval_start_date = llm_slots.get("start_date")
+        #     if not approval_end_date:
+        #         approval_end_date = llm_slots.get("end_date")
+
+        # context = self.context_builder.build(
+        #     current_user=current_user,
+        #     message=user_message,
+        #     tool_registry=tool_registry,
+        #     memory_context=memory_context,
+        # )
+        # context["secondary_intents"] = secondary_intents   # wait for test
+        # self.agent_memory_service.save_memory_snapshot(
+        #     session_id=session_id,
+        #     summary_text=memory_context.get("summary_text"),
+        #     current_intent=memory_context.get("current_intent"),
+        #     slot_snapshot_json=memory_context.get("slot_memory"),
+        # )
+        # context["current_user_obj"] = current_user
+        # context["session_id"] = session_id
+        # context["amount"] = amount
+        # context["leave_days"] = leave_days
+        # context["leave_reason"] = leave_reason
+        # context["semester"] = resolved_semester
+        # context["resource_type"] = resolved_resource_type
+        # context["booking_start_time"] = parsed_booking_start_time
+        # context["booking_end_time"] = parsed_booking_end_time
+        # context["selected_resource_index"] = resolved_selected_resource_index
+        # context["selected_plan_index"] = resolved_selected_plan_index
+        # context["approval_type"] = resolved_approval_type
+        # context["approval_reason"] = resolved_approval_reason
+        # context["approval_start_date"] = resolved_approval_start_date
+        # context["approval_end_date"] = resolved_approval_end_date
+
+#version1
+        parsed_request = self.router.parse_request(
             message=user_message,
+            memory_summary=memory_context.get("summary_text"),
+        )
+
+        intent = parsed_request["primary_intent"]
+        secondary_intents = parsed_request["secondary_intents"]
+        parsed_slots = parsed_request["slots"]
+
+        amount = parsed_slots.get("amount")
+        leave_days = parsed_slots.get("leave_days")
+        leave_reason = parsed_slots.get("leave_reason")
+
+        explicit_semester = parsed_slots.get("semester")
+        explicit_resource_type = parsed_slots.get("resource_type")
+
+        selected_resource_index_from_parse = parsed_slots.get("selected_resource_index")
+        selected_plan_index_from_parse = parsed_slots.get("selected_plan_index")
+
+        parsed_booking_start_time = parsed_slots.get("booking_start_time")
+        parsed_booking_end_time = parsed_slots.get("booking_end_time")
+
+        approval_type = parsed_slots.get("approval_type")
+        approval_reason = parsed_slots.get("approval_reason")
+        approval_start_date = parsed_slots.get("start_date")
+        approval_end_date = parsed_slots.get("end_date")
+
+        slot_memory = memory_context.get("slot_memory", {})
+        resource_booking_memory = slot_memory.get("resource_booking", {})
+        course_plan_memory = slot_memory.get("course_plan_generate", {})
+        zero_form_memory = slot_memory.get("zero_form_approval", {})
+
+        self.audit_service.record(
+            user_id=current_user.id,
+            action="agent.request.parsed",
+            target_type="agent_session",
+            target_id=session_id,
+            detail_json={
+                "user_message": user_message,
+                "parsed_request": parsed_request,
+            },
+        )
+
+        print("llm generator",parsed_request)
+
+        dynamic_plan = self.dynamic_plan_registry.get_plan(
+            primary_intent=intent,
+        )
+        if dynamic_plan is not None:
+            dynamic_tools = self.dynamic_tool_registry.list_tools_by_intent(
+                primary_intent=intent,
+            )
+
+            if dynamic_tools:
+                first_dynamic_tool = dynamic_tools[0]
+                input_schema_json = first_dynamic_tool.get("input_schema_json", {}) or {}
+
+                rule_dynamic_slots = self.dynamic_slot_extractor.extract_from_message(
+                    message=user_message,
+                    input_schema_json=input_schema_json,
+                )
+
+                llm_dynamic_slots = self.llm_provider.extract_dynamic_slots(
+                    user_message=user_message,
+                    primary_intent=intent,
+                    input_schema_json=input_schema_json,
+                    memory_summary=memory_context.get("summary_text"),
+                )
+
+                for key in input_schema_json.keys():
+                    current_value = parsed_slots.get(key)
+                    if current_value in (None, "", []):
+                        parsed_slots[key] = (
+                            rule_dynamic_slots.get(key)
+                            if rule_dynamic_slots.get(key) not in (None, "", [])
+                            else llm_dynamic_slots.get(key)
+                        )
+#        
+        dynamic_result = self.dynamic_capability_service.try_execute(
+            current_user=current_user,
+            user_message=user_message,
+            primary_intent=intent,
+            secondary_intents=secondary_intents,
+            parsed_slots=parsed_slots,
             memory_context=memory_context,
         )
-        secondary_intents = self.router.detect_secondary_intents(user_message)
 
-        amount = self.router.extract_amount(user_message)
-        leave_days = self.router.extract_leave_days(user_message)
-        leave_reason = self.router.extract_leave_reason(user_message)
-        selected_plan_index = self.router.extract_selected_plan_index(user_message)
+        if dynamic_result is not None:
+            if dynamic_result.get("success"):
+                self.audit_service.record(
+                    user_id=current_user.id,
+                    action="dynamic_capability.execute",
+                    target_type="agent_session",
+                    target_id=session_id,
+                    detail_json={
+                        "message": user_message,
+                        "intent": intent,
+                        "tool_results": dynamic_result.get("tool_results", []),
+                    },
+                )
+                return dynamic_result["reply"], False, None
 
-        explicit_resource_type = self.router.extract_resource_type(user_message)
-        booking_time_range = self.router.extract_booking_time_range(user_message)
-        selected_resource_index = self.router.extract_candidate_index(user_message)
-
-        # plan to change position
-        resource_booking_memory = memory_context.get("slot_memory", {}).get("resource_booking", {})
-
-        resolved_resource_type = (
-            explicit_resource_type
-            or resource_booking_memory.get("resource_type")
-        )
-
-        resolved_booking_start_time = (
-            booking_time_range[0] if booking_time_range else resource_booking_memory.get("start_time")
-        )
-        resolved_booking_end_time = (
-            booking_time_range[1] if booking_time_range else resource_booking_memory.get("end_time")
-        )
-
-        resolved_selected_resource_index = (
-            selected_resource_index
-            or resource_booking_memory.get("selected_resource_index")
-        )
+            self.audit_service.record(
+                user_id=current_user.id,
+                action="dynamic_capability.execute_failed",
+                target_type="agent_session",
+                target_id=session_id,
+                detail_json={
+                    "message": user_message,
+                    "intent": intent,
+                    "error": dynamic_result.get("message"),
+                },
+            )
+#  DYNAMIC CAPABILITY END
 
         if intent == "fallback":
             pending_intent = slot_memory.get("pending_intent")
@@ -557,45 +972,146 @@ class AgentSessionService:
                 "campus_card_topup",
                 "leave_create",
                 "query_schedule",
+                "course_plan_submit",
+                "resource_booking_submit",
+                "zero_form_approval_generate",
             }:
                 intent = pending_intent
 
-        if not amount:
-            amount = (
-                slot_memory.get("campus_card_topup", {})
-                .get("amount")
-            )
+        if amount is None:
+            amount = slot_memory.get("campus_card_topup", {}).get("amount")
 
-        if not leave_days:
-            leave_days = (
-                slot_memory.get("leave_create", {})
-                .get("days")
-            )
+        if leave_days is None:
+            leave_days = slot_memory.get("leave_create", {}).get("days")
 
         if not leave_reason:
-            leave_reason = (
-                slot_memory.get("leave_create", {})
-                .get("reason")
-            )
+            leave_reason = slot_memory.get("leave_create", {}).get("reason")
 
         llm_slots = {}
         if (
-            (intent == "campus_card_topup" and not amount)
-            or (intent == "leave_create" and (not leave_days or not leave_reason))
-            or (intent == "course_plan_submit" and not selected_plan_index)
+            (intent == "campus_card_topup" and amount is None)
+            or (intent == "leave_create" and (leave_days is None or not leave_reason))
+            or (intent == "course_plan_submit" and selected_plan_index_from_parse is None)
+            or (intent == "resource_booking_submit" and selected_resource_index_from_parse is None)
+            or (intent == "resource_booking_generate" and (
+                not explicit_resource_type
+                or not parsed_booking_start_time
+                or not parsed_booking_end_time
+            ))
+            or (intent == "zero_form_approval_generate" and not approval_type)
         ):
-            llm_slots = self.router.extract_slots_with_llm(intent=intent, message=user_message)
-        if intent == "course_plan_submit" and not selected_plan_index:
-            selected_plan_index = llm_slots.get("selected_plan_index")
-        print("LLM extracted slots:", llm_slots)
-        if intent == "campus_card_topup" and not amount:
+            llm_slots = self.router.extract_slots_with_llm(
+                intent=intent,
+                message=user_message,
+            )
+
+        print("llm_extracted_slots:", llm_slots)
+
+        if intent == "campus_card_topup" and amount is None:
             amount = llm_slots.get("amount")
 
         if intent == "leave_create":
-            if not leave_days:
+            if leave_days is None:
                 leave_days = llm_slots.get("days")
             if not leave_reason:
                 leave_reason = llm_slots.get("reason")
+
+        if intent == "course_plan_submit":
+            if selected_plan_index_from_parse is None:
+                selected_plan_index_from_parse = llm_slots.get("selected_plan_index")
+
+        if intent == "resource_booking_generate":
+            if not explicit_resource_type:
+                explicit_resource_type = llm_slots.get("resource_type")
+            if not parsed_booking_start_time:
+                parsed_booking_start_time = llm_slots.get("booking_start_time")
+            if not parsed_booking_end_time:
+                parsed_booking_end_time = llm_slots.get("booking_end_time")
+
+        if intent == "resource_booking_submit":
+            if selected_resource_index_from_parse is None:
+                selected_resource_index_from_parse = llm_slots.get("selected_resource_index")
+            if not parsed_booking_start_time:
+                parsed_booking_start_time = llm_slots.get("booking_start_time")
+            if not parsed_booking_end_time:
+                parsed_booking_end_time = llm_slots.get("booking_end_time")
+
+        if intent == "zero_form_approval_generate":
+            if not approval_type:
+                approval_type = llm_slots.get("approval_type")
+            if not approval_reason:
+                approval_reason = llm_slots.get("reason")
+            if not approval_start_date:
+                approval_start_date = llm_slots.get("start_date")
+            if not approval_end_date:
+                approval_end_date = llm_slots.get("end_date")
+
+        # 统一 resolve，放在 llm 补槽之后
+        memory_semester = slot_memory.get("semester")
+        resolved_semester = (
+            explicit_semester
+            or memory_semester
+            or SemesterUtils.get_current_semester()
+        )
+
+        resolved_resource_type = (
+            explicit_resource_type
+            if explicit_resource_type
+            else resource_booking_memory.get("resource_type")
+        )
+
+        resolved_booking_start_time = (
+            parsed_booking_start_time
+            if parsed_booking_start_time
+            else resource_booking_memory.get("start_time")
+        )
+
+        resolved_booking_end_time = (
+            parsed_booking_end_time
+            if parsed_booking_end_time
+            else resource_booking_memory.get("end_time")
+        )
+
+        resolved_selected_resource_index = (
+            selected_resource_index_from_parse
+            if selected_resource_index_from_parse is not None
+            else resource_booking_memory.get("selected_resource_index")
+        )
+
+        resolved_selected_plan_index = (
+            selected_plan_index_from_parse
+            if selected_plan_index_from_parse is not None
+            else course_plan_memory.get("selected_plan_index")
+        )
+
+        resolved_approval_type = (
+            approval_type
+            if approval_type
+            else zero_form_memory.get("approval_type")
+        )
+
+        resolved_approval_reason = (
+            approval_reason
+            if approval_reason
+            else zero_form_memory.get("approval_reason")
+        )
+
+        resolved_approval_start_date = (
+            approval_start_date
+            if approval_start_date
+            else zero_form_memory.get("start_date")
+        )
+
+        resolved_approval_end_date = (
+            approval_end_date
+            if approval_end_date
+            else zero_form_memory.get("end_date")
+        )
+
+        print("final_approval_type:", approval_type)
+        print("resolved_approval_type:", resolved_approval_type)
+        print("resolved_selected_resource_index:", resolved_selected_resource_index)
+        print("resolved_selected_plan_index:", resolved_selected_plan_index)
 
         context = self.context_builder.build(
             current_user=current_user,
@@ -603,25 +1119,39 @@ class AgentSessionService:
             tool_registry=tool_registry,
             memory_context=memory_context,
         )
-        context["secondary_intents"] = secondary_intents   # wait for test
+
+        context["secondary_intents"] = secondary_intents
         self.agent_memory_service.save_memory_snapshot(
             session_id=session_id,
             summary_text=memory_context.get("summary_text"),
             current_intent=memory_context.get("current_intent"),
             slot_snapshot_json=memory_context.get("slot_memory"),
         )
+        # if resolved_selected_resource_index is not None:
+        #     resolved_selected_resource_index+=1
+        # if resolved_selected_plan_index is not None:
+        #     resolved_selected_plan_index+=1
+        context["current_user_obj"] = current_user
         context["session_id"] = session_id
         context["amount"] = amount
         context["leave_days"] = leave_days
         context["leave_reason"] = leave_reason
-        context["semester"] = "2026-spring"   # for course planning, hardcoded for now, can be extracted from message or user profile in the future
-
-        #
+        context["semester"] = resolved_semester
         context["resource_type"] = resolved_resource_type
         context["booking_start_time"] = resolved_booking_start_time
         context["booking_end_time"] = resolved_booking_end_time
         context["selected_resource_index"] = resolved_selected_resource_index
+        context["selected_plan_index"] = resolved_selected_plan_index
+        context["approval_type"] = resolved_approval_type
+        context["approval_reason"] = resolved_approval_reason
+        context["approval_start_date"] = resolved_approval_start_date
+        context["approval_end_date"] = resolved_approval_end_date
+
+        print("service line 515 context:", context)
         #
+        #3/23 /changed  / not sure if need to save to context
+        selected_plan_index = context.get("selected_plan_index")
+
         if selected_plan_index is None:
             selected_plan_index = (
                 memory_context.get("slot_memory", {})
@@ -629,7 +1159,7 @@ class AgentSessionService:
                 .get("selected_plan_index")
             )
 
-        context["selected_plan_index"] = selected_plan_index
+        #context["selected_plan_index"] = selected_plan_index
 
         use_llm_planner = self.prompt_manager.should_use_llm_planner(
             primary_intent=intent,
@@ -843,7 +1373,49 @@ class AgentSessionService:
                 },
             )
             return response_text, True, pending_action.id
+        
+        if first_step_type == "create_pending_zero_form_approval_submit":
+            zero_form_memory = memory_context.get("slot_memory", {}).get("zero_form_approval", {})
+            last_form_draft = zero_form_memory.get("last_form_draft")
 
+            if not last_form_draft or not last_form_draft.get("success"):
+                return "当前会话中还没有可提交的审批草稿，请先让我为你生成审批表单。", False, None
+
+            if last_form_draft.get("missing_fields"):
+                return f"当前审批草稿仍缺少字段：{', '.join(last_form_draft['missing_fields'])}，请先补充后再提交。", False, None
+
+            workflow = ZeroFormApprovalWorkflow(self.pending_action_repository)
+            pending_action = workflow.create_pending_submit(
+                current_user=current_user,
+                session_id=session_id,
+                approval_type=last_form_draft["approval_type"],
+                template_id=last_form_draft["template_id"],
+                approver_user_id=last_form_draft.get("approver_user_id"),
+                form_data=last_form_draft["form_data"],
+            )
+
+            self.audit_service.record(
+                user_id=current_user.id,
+                action="pending_action.create",
+                target_type="pending_action",
+                target_id=pending_action.id,
+                detail_json={
+                    "action_type": "zero_form_approval_submit",
+                    "approval_type": last_form_draft["approval_type"],
+                    "session_id": session_id,
+                },
+            )
+
+            response_text = self.response_formatter.format(
+                intent="zero_form_approval_submit",
+                result={
+                    "requires_confirmation": True,
+                    "approval_type": last_form_draft["approval_type"],
+                    "action_id": pending_action.id,
+                },
+            )
+            return response_text, True, pending_action.id
+        
         print("Generated plan:", plan)
 
 
@@ -859,8 +1431,10 @@ class AgentSessionService:
                 user_name=current_user.full_name,
                 user_message=user_message,
                 memory_context=memory_context,
+                session_id=session_id,
+                user_id=current_user.id,
             ), False, None
-
+            
         if not execution_result.get("success"):
             return "我识别到了你的业务请求，但执行过程中出了点问题。后面我们会补上更完整的错误处理。", False, None
         
@@ -1021,6 +1595,51 @@ class AgentSessionService:
                 memory_summary=memory_context.get("summary_text"),
             )
             return final_reply, False, None
+        
+        if intent == "zero_form_approval_generate":
+            self.audit_service.record(
+                user_id=current_user.id,
+                action="zero_form_approval.generate",
+                target_type="agent_session",
+                target_id=session_id,
+                detail_json={
+                    "message": user_message,
+                    "approval_type": resolved_approval_type,
+                },
+            )
+
+            tool_result_summary = self._build_tool_result_summary(
+                primary_intent=intent,
+                execution_result=execution_result,
+            )
+
+            approval_result = execution_result.get("tool_results", {}).get("generate_zero_form_approval", {})
+            updated_slot_snapshot = memory_context.get("slot_memory", {}).copy()
+            updated_slot_snapshot["zero_form_approval"] = {
+                "approval_type": resolved_approval_type,
+                "approval_reason": resolved_approval_reason,
+                "start_date": resolved_approval_start_date,
+                "end_date": resolved_approval_end_date,
+                "last_form_draft": approval_result,
+            }
+
+            self.agent_memory_service.save_memory_snapshot(
+                session_id=session_id,
+                summary_text=memory_context.get("summary_text"),
+                current_intent="zero_form_approval_generate",
+                slot_snapshot_json=updated_slot_snapshot,
+            )
+
+            final_reply = self.response_composer.compose(
+                user_name=current_user.full_name,
+                user_message=user_message,
+                primary_intent=intent,
+                secondary_intents=secondary_intents,
+                tool_result_summary=tool_result_summary,
+                reasoning_result_summary=None,
+                memory_summary=memory_context.get("summary_text"),
+            )
+            return final_reply, False, None
         return self.response_formatter.format(intent=intent, result=execution_result), False, None
 
     # old query
@@ -1164,7 +1783,7 @@ class AgentSessionService:
             if step_type == "call_tool":
                 tool_name = step["tool_name"]
                 params = step.get("params", {})
-
+                
                 tool_log = self.tool_execution_log_service.start_log(
                     session_id=session_id,
                     tool_name=tool_name,
@@ -1255,9 +1874,31 @@ class AgentSessionService:
         user_name: str,
         user_message: str,
         memory_context: dict | None = None,
+        session_id: int | None = None,
+        user_id: int | None = None,
     ) -> str:
+        print("in fallback")
         recent_messages = memory_context.get("recent_messages", []) if memory_context else []
         summary_text = memory_context.get("summary_text", "") if memory_context else ""
+
+        proposal_result = self.capability_service.try_propose_from_fallback(
+            session_id=session_id,
+            user_id=user_id,
+            user_message=user_message,
+            memory_summary=summary_text,
+        )
+
+        if proposal_result is not None and proposal_result.get("success"):
+            capability_name = proposal_result.get("capability_name")
+            proposal_type = proposal_result.get("proposal_type")
+            proposal_id = proposal_result.get("proposal_id")
+
+            return (
+                f"你好，{user_name}。当前这项需求还没有现成能力可以直接处理。"
+                f"不过我已经为这条请求生成了一条能力提案，"
+                f"提案名称：{capability_name}，类型：{proposal_type}，提案编号：{proposal_id}。"
+                "后续可以基于这条提案继续补充规则、计划或新工具。"
+            )
 
         memory_text = ""
         if recent_messages:
@@ -1319,6 +1960,12 @@ class AgentSessionService:
             return self.response_formatter.format(
                 intent="resource_booking_generate",
                 result=resource_result,
+            )
+        if primary_intent == "zero_form_approval_generate":
+            approval_result = tool_results.get("generate_zero_form_approval", {})
+            return self.response_formatter.format(
+                intent="zero_form_approval_generate",
+                result=approval_result,
             )
         return "已完成相关工具调用。"
 

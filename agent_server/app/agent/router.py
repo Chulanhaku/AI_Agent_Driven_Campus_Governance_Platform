@@ -1,11 +1,21 @@
 import re
 
 from app.llm.base import BaseLlmProvider
+from app.self_iteration import dynamic_plan_registry
+from app.utils.semester_utils import SemesterUtils
 from datetime import datetime, timedelta
+from app.agent.intent_catalog import IntentCatalog
 
 class AgentRouter:
-    def __init__(self, llm_provider: BaseLlmProvider | None = None) -> None:
+    def __init__(
+        self,
+        llm_provider: BaseLlmProvider | None = None,
+        capability_registry=None,
+        dynamic_plan_registry=None,
+    ) -> None:
         self.llm_provider = llm_provider
+        self.capability_registry = capability_registry
+        self.dynamic_plan_registry = dynamic_plan_registry
 
     # def detect_intent(self, message: str) -> str:
     #     rule_intent = self._detect_intent_by_rules(message)
@@ -30,6 +40,83 @@ class AgentRouter:
     #             pass
 
     #     return "fallback"
+    def get_supported_primary_intents(self) -> list[str]:
+        dynamic_intents = []
+        if self.dynamic_plan_registry is not None:
+            dynamic_intents = self.dynamic_plan_registry.list_primary_intents()
+
+        return IntentCatalog.merge_primary_intents(
+            dynamic_primary_intents=dynamic_intents,
+        )
+
+    def parse_request(
+        self,
+        *,
+        message: str,
+        memory_summary: str | None = None,
+    ) -> dict:
+        rule_primary_intent = self.detect_intent(message=message)
+        rule_secondary_intents = self.detect_secondary_intents(message=message)
+
+        rule_slots = {
+            "amount": self.extract_amount(message),
+            "leave_days": self.extract_leave_days(message),
+            "leave_reason": self.extract_leave_reason(message),
+            "semester": self.extract_semester(message),
+            "resource_type": self.extract_resource_type(message),
+            "booking_start_time": None,
+            "booking_end_time": None,
+            "selected_plan_index": self.extract_plan_index(message),
+            "selected_resource_index": self.extract_candidate_index(message),
+        }
+
+        booking_time_range = self.extract_booking_time_range(message)
+        if booking_time_range is not None:
+            rule_slots["booking_start_time"] = booking_time_range[0]
+            rule_slots["booking_end_time"] = booking_time_range[1]
+        supported_primary_intents = self.get_supported_primary_intents()
+        supported_secondary_intents = IntentCatalog.get_static_secondary_intents()
+        llm_result = None
+        if self.llm_provider is not None:
+            try:
+                llm_result = self.llm_provider.parse_user_request(
+                    message=message,
+                    memory_summary=memory_summary,
+                    supported_primary_intents=supported_primary_intents,
+                    supported_secondary_intents=supported_secondary_intents,
+                )
+            except Exception:
+                llm_result = None
+
+        llm_primary_intent = None
+        llm_secondary_intents: list[str] = []
+        llm_slots: dict = {}
+
+        if llm_result:
+            llm_primary_intent = llm_result.get("primary_intent")
+            llm_secondary_intents = llm_result.get("secondary_intents", []) or []
+            llm_slots = llm_result.get("slots", {}) or {}
+
+        resolved_primary_intent = rule_primary_intent
+        if resolved_primary_intent == "fallback" and llm_primary_intent:
+            resolved_primary_intent = llm_primary_intent
+
+        resolved_secondary_intents = list(dict.fromkeys(rule_secondary_intents + llm_secondary_intents))
+
+        resolved_slots = {}
+        for key, rule_value in rule_slots.items():
+            resolved_slots[key] = rule_value if rule_value not in (None, [], "") else llm_slots.get(key)
+
+        return {
+            "primary_intent": resolved_primary_intent,
+            "secondary_intents": resolved_secondary_intents,
+            "slots": resolved_slots,
+            "rule_primary_intent": rule_primary_intent,
+            "llm_primary_intent": llm_primary_intent,
+        }
+
+
+
 
     def detect_intent(
         self,
@@ -37,6 +124,11 @@ class AgentRouter:
         message: str,
         memory_context: dict | None = None,
     ) -> str:
+        if self.capability_registry is not None:
+            aliased_intent = self.capability_registry.resolve_intent_alias(message=message)
+            if aliased_intent:
+                return aliased_intent
+
         rule_intent = self._detect_intent_by_rules(
             message=message,
             memory_context=memory_context,
@@ -52,18 +144,24 @@ class AgentRouter:
                     recent_messages_text=recent_messages_text,
                 )
                 intent = result.get("intent", "fallback")
-                if intent in {
-                    "query_schedule",
-                    "campus_card_topup",
-                    "leave_create",
-                    "policy_qa",
-                    "fallback",
-                    "course_plan_generate",
-                    "course_plan_submit",
-                    "resource_booking_generate",
-                    "resource_booking_submit",
-                }:
+                allowed_intent = set(self.get_supported_primary_intents())
+                if intent in allowed_intent:
                     return intent
+                # if intent in {
+                #     "query_schedule",
+                #     "campus_card_topup",
+                #     "leave_create",
+                #     "policy_qa",
+                #     "fallback",
+                #     "course_plan_generate",
+                #     "course_plan_submit",
+                #     "resource_booking_generate",
+                #     "resource_booking_submit",
+                #     "zero_form_approval_generate",
+                #     "zero_form_approval_submit",
+                #     "dynamic_course_catalog_query",
+                # }:
+                #     return intent
             except Exception:
                 pass
 
@@ -75,6 +173,7 @@ class AgentRouter:
         message: str,
         memory_context: dict | None = None,
     ) -> str:
+        return "fallback"
         normalized = message.strip().lower()
 
         policy_keywords = [
@@ -174,6 +273,31 @@ class AgentRouter:
             "帮我预约",
             "我要预约",
         ]
+
+        zero_form_submit_keywords = [
+            "提交审批",
+            "确认提交审批",
+            "提交这个申请",
+            "就按这个提交",
+        ]
+        for keyword in zero_form_submit_keywords:
+            if keyword in normalized:
+                return "zero_form_approval_submit"
+
+        zero_form_generate_keywords = [
+            "帮我申请",
+            "帮我提交申请",
+            "帮我填申请",
+            "我想申请",
+            "我要申请",
+            "开证明",
+            "外出申请",
+            "请假申请",
+        ]
+        for keyword in zero_form_generate_keywords:
+            if keyword in normalized:
+                return "zero_form_approval_generate"
+
         for keyword in resource_booking_keywords:
             if keyword in normalized:
                 return "resource_booking_generate"
@@ -209,6 +333,7 @@ class AgentRouter:
 
         for keyword in schedule_keywords:
             if keyword in normalized:
+                print("rule matched query_schedule")
                 return "query_schedule"
 
         return "fallback"
@@ -411,6 +536,17 @@ class AgentRouter:
         return None
     
 
+    def extract_plan_index(self, message: str) -> int | None:
+        match = re.search(r"方案\s*(\d+)", message)
+        if match:
+            return int(match.group(1))
+
+        match = re.search(r"选\s*方案\s*(\d+)", message)
+        if match:
+            return int(match.group(1))
+
+        return None
+
     def extract_booking_time_range(self, message: str) -> tuple[str, str] | None:
         normalized = message.strip().lower()
         now = datetime.now()
@@ -434,3 +570,118 @@ class AgentRouter:
             end = start.replace(hour=21, minute=0, second=0, microsecond=0)
 
         return start.isoformat(), end.isoformat()
+    
+    def extract_semester(self, message: str) -> str | None:
+        from datetime import datetime
+        import re
+
+        normalized = message.strip().lower()
+
+        def build_semester_by_date(target_date: datetime) -> str:
+            year = target_date.year
+            month = target_date.month
+
+            # 约定：
+            # fall: 秋季学期（9月~次年2月前半段按秋季学期理解）
+            # spring: 春季学期（3月~8月）
+            if month >= 9:
+                return f"{year}-fall"
+            if 1 <= month <= 2:
+                return f"{year - 1}-fall"
+            return f"{year}-spring"
+
+        now = datetime.now()
+
+        def next_semester(semester: str) -> str:
+            match = re.match(r"(\d{4})-(spring|fall)", semester)
+            if not match:
+                return None
+            year = int(match.group(1))
+            season = match.group(2)
+
+            if season == "fall":
+                return f"{year + 1}-spring"
+            return f"{year}-fall"
+
+        def prev_semester(semester: str) -> str:
+            match = re.match(r"(\d{4})-(spring|fall)", semester)
+            if not match:
+                return None
+            year = int(match.group(1))
+            season = match.group(2)
+
+            if season == "spring":
+                return f"{year - 1}-fall"
+            return f"{year}-spring"
+
+        current_semester = build_semester_by_date(now)
+
+        # 相对学期
+        if "下学期" in message:
+            return next_semester(current_semester)
+
+        if "上学期" in message:
+            return prev_semester(current_semester)
+
+        if "这学期" in message or "本学期" in message or "当前学期" in message:
+            return current_semester
+
+        # 直接匹配：2026-spring / 2026_fall / 2026 spring
+        match = re.search(r"(20\d{2})\s*[-_\s]?\s*(spring|fall)", normalized)
+        if match:
+            year = match.group(1)
+            season = match.group(2)
+            return f"{year}-{season}"
+
+        # 匹配：2026年春季学期 / 2026年秋季学期
+        match = re.search(r"(20\d{2})\s*年\s*(春季|秋季)", message)
+        if match:
+            year = int(match.group(1))
+            season = match.group(2)
+            return f"{year}-spring" if season == "春季" else f"{year}-fall"
+
+        # 匹配：2025-2026学年第一学期 / 第二学期
+        # 约定：
+        # 第一学期 -> 2025-fall
+        # 第二学期 -> 2026-spring
+        match = re.search(
+            r"(20\d{2})\s*[-_/]\s*(20\d{2})\s*学年\s*第?\s*([一二12])\s*学期",
+            message
+        )
+        if match:
+            start_year = int(match.group(1))
+            end_year = int(match.group(2))
+            term_raw = match.group(3)
+
+            if end_year == start_year + 1:
+                if term_raw in ["一", "1"]:
+                    return f"{start_year}-fall"
+                return f"{end_year}-spring"
+
+        # 匹配：2025-2026-1 / 2025-2026-2
+        # 约定：
+        # 1 -> 2025-fall
+        # 2 -> 2026-spring
+        match = re.search(r"(20\d{2})\s*[-_/]\s*(20\d{2})\s*[-_/]\s*([12])", normalized)
+        if match:
+            start_year = int(match.group(1))
+            end_year = int(match.group(2))
+            term = match.group(3)
+
+            if end_year == start_year + 1:
+                if term == "1":
+                    return f"{start_year}-fall"
+                return f"{end_year}-spring"
+
+        # 口语写法
+        if "秋季学期" in message:
+            year_match = re.search(r"(20\d{2})", message)
+            if year_match:
+                return f"{year_match.group(1)}-fall"
+
+        if "春季学期" in message:
+            year_match = re.search(r"(20\d{2})", message)
+            if year_match:
+                return f"{year_match.group(1)}-spring"
+
+        return None

@@ -2,7 +2,7 @@ from app.llm.base import BaseLlmProvider
 
 
 class LocalLlmProvider(BaseLlmProvider):
-    def classify_intent(self, *, message: str) -> dict:
+    def classify_intent(self, *, message: str ,supported_primary_intents: list[str] | None = None,supported_secondary_intents: list[str] | None = None,) -> dict:
         return {
             "intent": "fallback",
             "confidence": 0.0,
@@ -49,7 +49,35 @@ class LocalLlmProvider(BaseLlmProvider):
         if recent_messages_text:
             return f"会话摘要：{recent_messages_text[:160]}"
         return existing_summary or ""
-
+    
+    def parse_user_request(
+        self,
+        *,
+        message: str,
+        memory_summary: str | None = None,
+        supported_primary_intents: list[str] | None = None,
+        supported_secondary_intents: list[str] | None = None,
+    ) -> dict:
+        return {
+            "primary_intent": "fallback",
+            "secondary_intents": [],
+            "slots": {
+                "amount": None,
+                "leave_days": None,
+                "leave_reason": None,
+                "semester": None,
+                "resource_type": None,
+                "booking_start_time": None,
+                "booking_end_time": None,
+                "selected_plan_index": None,
+                "selected_resource_index": None,
+                "approval_type": None,
+                "approval_reason": None,
+                "start_date": None,
+                "end_date": None,
+            },
+        }
+    
     def compose_tool_response(
         self,
         *,
@@ -87,4 +115,46 @@ class LocalLlmProvider(BaseLlmProvider):
                     "type": "fallback",
                 }
             ],
+        }
+        
+    def generate_capability_proposal(
+        self,
+        *,
+        user_message: str,
+        research_summary: dict,
+        memory_summary: str | None,
+    ) -> dict:
+        normalized = user_message.strip().lower()
+
+        capability_name = "unknown_capability"
+        if "校车" in normalized or "班车" in normalized:
+            capability_name = "query_shuttle_schedule"
+        elif "羽毛球馆" in normalized:
+            capability_name = "book_badminton_court"
+        elif "成绩单" in normalized:
+            capability_name = "export_transcript"
+
+        return {
+            "proposal_type": "tool_spec",
+            "capability_name": capability_name,
+            "needs_new_tool": True,
+            "intent_aliases": [],
+            "reason": "local/mock provider generated fallback capability proposal",
+            "research_summary": research_summary,
+            "confidence_score": 0.55,
+            "risk_level": "medium",
+        }
+    
+
+    def extract_dynamic_slots(
+        self,
+        *,
+        user_message: str,
+        primary_intent: str,
+        input_schema_json: dict,
+        memory_summary: str | None,
+    ) -> dict:
+        return {
+            key: None
+            for key in input_schema_json.keys()
         }

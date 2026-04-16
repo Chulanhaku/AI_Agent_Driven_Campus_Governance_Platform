@@ -43,6 +43,23 @@ class Settings(BaseSettings):
     embedding_base_url: str | None = None
     embedding_model: str = "text-embedding-3-small"
     embedding_dimensions: int | None = None
+    self_iteration_enable_web_research: bool = False
+    self_iteration_enable_db_research: bool = True
+
+    serper_api_key: str | None = None
+    serper_search_url: str = "https://google.serper.dev/search"
+
+    self_iteration_allowed_domains: str = ""
+    self_iteration_db_allowlist_tables: str = (
+        "roles,permissions,users,student_profiles,teacher_profiles,"
+        "courses,schedule_entries,exam_schedules,course_sections,"
+        "student_course_plans,student_completed_courses,course_prerequisites,"
+        "course_enrollment_requests,course_enrollment_request_items,"
+        "resources,resource_bookings,integrity_score_records,"
+        "approval_templates,zero_form_approval_requests,"
+        "notifications,pending_actions,agent_sessions,agent_messages,"
+        "agent_session_memories,tool_execution_logs,audit_logs"
+    )
 
 @lru_cache
 def get_settings() -> Settings:

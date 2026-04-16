@@ -135,6 +135,28 @@ class MemoryManager:
                     or persisted_slot_memory.get("resource_booking", {}).get("selected_resource_index")
                 ),
             },
+            "zero_form_approval": {
+                "approval_type": (
+                    runtime_slot_memory.get("zero_form_approval", {}).get("approval_type")
+                    or persisted_slot_memory.get("zero_form_approval", {}).get("approval_type")
+                ),
+                "approval_reason": (
+                    runtime_slot_memory.get("zero_form_approval", {}).get("approval_reason")
+                    or persisted_slot_memory.get("zero_form_approval", {}).get("approval_reason")
+                ),
+                "start_date": (
+                    runtime_slot_memory.get("zero_form_approval", {}).get("start_date")
+                    or persisted_slot_memory.get("zero_form_approval", {}).get("start_date")
+                ),
+                "end_date": (
+                    runtime_slot_memory.get("zero_form_approval", {}).get("end_date")
+                    or persisted_slot_memory.get("zero_form_approval", {}).get("end_date")
+                ),
+                "last_form_draft": (
+                    runtime_slot_memory.get("zero_form_approval", {}).get("last_form_draft")
+                    or persisted_slot_memory.get("zero_form_approval", {}).get("last_form_draft")
+                ),
+            },
         }
         return merged
 
@@ -179,6 +201,7 @@ class MemoryManager:
     def _extract_slot_memory(self, messages: list[dict]) -> dict:
         slot_memory = {
             "pending_intent": None,
+            "semester": None,
             "campus_card_topup": {
                 "amount": None,
             },
@@ -198,6 +221,14 @@ class MemoryManager:
                 "end_time": None,
                 "last_candidates": [],
                 "selected_resource_index": None,
+                "pending_booking": {},
+            },
+            "zero_form_approval": {
+                "approval_type": None,
+                "approval_reason": None,
+                "start_date": None,
+                "end_date": None,
+                "last_form_draft": None,
             },
         }
 
@@ -221,6 +252,11 @@ class MemoryManager:
             if amount is not None:
                 slot_memory["campus_card_topup"]["amount"] = amount
             
+            semester = self._extract_semester(content)
+            if semester is not None:
+                slot_memory["semester"] = semester
+                slot_memory["course_plan_generate"]["semester"] = semester
+
             plan_index = self._extract_plan_index(content)
             if plan_index is not None:
                 slot_memory["course_plan_generate"]["selected_plan_index"] = plan_index
@@ -352,3 +388,118 @@ class MemoryManager:
             end = start.replace(hour=21, minute=0, second=0, microsecond=0)
 
         return start.isoformat(), end.isoformat()
+
+    def _extract_semester(self, message: str) -> str | None:
+        from datetime import datetime
+        import re
+
+        normalized = message.strip().lower()
+
+        def build_semester_by_date(target_date: datetime) -> str:
+            year = target_date.year
+            month = target_date.month
+
+            # 约定：
+            # fall: 秋季学期（9月~次年2月前半段按秋季学期理解）
+            # spring: 春季学期（3月~8月）
+            if month >= 9:
+                return f"{year}-fall"
+            if 1 <= month <= 2:
+                return f"{year - 1}-fall"
+            return f"{year}-spring"
+
+        now = datetime.now()
+
+        def next_semester(semester: str) -> str:
+            match = re.match(r"(\d{4})-(spring|fall)", semester)
+            if not match:
+                return None
+            year = int(match.group(1))
+            season = match.group(2)
+
+            if season == "fall":
+                return f"{year + 1}-spring"
+            return f"{year}-fall"
+
+        def prev_semester(semester: str) -> str:
+            match = re.match(r"(\d{4})-(spring|fall)", semester)
+            if not match:
+                return None
+            year = int(match.group(1))
+            season = match.group(2)
+
+            if season == "spring":
+                return f"{year - 1}-fall"
+            return f"{year}-spring"
+
+        current_semester = build_semester_by_date(now)
+
+        # 相对学期
+        if "下学期" in message:
+            return next_semester(current_semester)
+
+        if "上学期" in message:
+            return prev_semester(current_semester)
+
+        if "这学期" in message or "本学期" in message or "当前学期" in message:
+            return current_semester
+
+        # 直接匹配：2026-spring / 2026_fall / 2026 spring
+        match = re.search(r"(20\d{2})\s*[-_\s]?\s*(spring|fall)", normalized)
+        if match:
+            year = match.group(1)
+            season = match.group(2)
+            return f"{year}-{season}"
+
+        # 匹配：2026年春季学期 / 2026年秋季学期
+        match = re.search(r"(20\d{2})\s*年\s*(春季|秋季)", message)
+        if match:
+            year = int(match.group(1))
+            season = match.group(2)
+            return f"{year}-spring" if season == "春季" else f"{year}-fall"
+
+        # 匹配：2025-2026学年第一学期 / 第二学期
+        # 约定：
+        # 第一学期 -> 2025-fall
+        # 第二学期 -> 2026-spring
+        match = re.search(
+            r"(20\d{2})\s*[-_/]\s*(20\d{2})\s*学年\s*第?\s*([一二12])\s*学期",
+            message
+        )
+        if match:
+            start_year = int(match.group(1))
+            end_year = int(match.group(2))
+            term_raw = match.group(3)
+
+            if end_year == start_year + 1:
+                if term_raw in ["一", "1"]:
+                    return f"{start_year}-fall"
+                return f"{end_year}-spring"
+
+        # 匹配：2025-2026-1 / 2025-2026-2
+        # 约定：
+        # 1 -> 2025-fall
+        # 2 -> 2026-spring
+        match = re.search(r"(20\d{2})\s*[-_/]\s*(20\d{2})\s*[-_/]\s*([12])", normalized)
+        if match:
+            start_year = int(match.group(1))
+            end_year = int(match.group(2))
+            term = match.group(3)
+
+            if end_year == start_year + 1:
+                if term == "1":
+                    return f"{start_year}-fall"
+                return f"{end_year}-spring"
+
+        # 口语写法
+        if "秋季学期" in message:
+            year_match = re.search(r"(20\d{2})", message)
+            if year_match:
+                return f"{year_match.group(1)}-fall"
+
+        if "春季学期" in message:
+            year_match = re.search(r"(20\d{2})", message)
+            if year_match:
+                return f"{year_match.group(1)}-spring"
+
+        return None

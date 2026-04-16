@@ -24,6 +24,16 @@ from app.db.models.audit_log import AuditLog
 from app.db.models.tool_execution_log import ToolExecutionLog
 from app.db.models.resourse_booking import ResourceBooking,Resource,IntegrityScoreRecord
 from app.db.models.notification import Notification
+from app.db.models.zero_form_approval import ApprovalTemplate, ZeroFormApprovalRequest
+from app.db.models.capability_proposal import CapabilityProposal
+from app.db.models.tool_spec_artifact import ToolSpecArtifact
+from app.db.models.dynamic_capability import DynamicToolDefinition, DynamicPlanDefinition
+from app.db.models.campus_life import Canteen, CanteenStall, CanteenMenuItem
+from app.db.models.dormitory import DormBuilding, DormRoom, DormAssignment, DormUtilityAccount,DormUtilityUsageRecord
+from app.db.models.student_affair import StudentRewardPunishmentRecord
+from app.db.models.shuttle_bus import ShuttleStop, ShuttleRoute, ShuttleRouteStop, ShuttleSchedule
+from app.db.models.academic_rule import GraduationRequirement
+
 __all__ = [
     "Role",
     "Permission",
@@ -54,4 +64,24 @@ __all__ = [
     "Resource",
     "IntegrityScoreRecord",
     "Notification",
+    "ApprovalTemplate",
+    "ZeroFormApprovalRequest",
+    "CapabilityProposal",
+    "ToolSpecArtifact",
+    "DynamicToolDefinition",
+    "DynamicPlanDefinition",
+    "Canteen",
+    "CanteenStall",
+    "CanteenMenuItem",
+    "DormBuilding",
+    "DormRoom",
+    "DormAssignment",
+    "DormUtilityAccount",
+    "StudentRewardPunishmentRecord",
+    "ShuttleStop",
+    "ShuttleRoute",
+    "ShuttleRouteStop",
+    "ShuttleSchedule",
+    "GraduationRequirement",
+    "DormUtilityUsageRecord"
 ]
