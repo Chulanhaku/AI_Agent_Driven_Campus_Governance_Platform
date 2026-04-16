@@ -31,30 +31,30 @@ AI_Agent_Driven_Campus_Governance_Platform/
 ```
 
 ## 4. Backend Setup
-4.1 Navigate to the backend directory
+- 4.1 Navigate to the backend directory
 cd agent_server
-4.2 Create a virtual environment
+- 4.2 Create a virtual environment
 python -m venv .venv
-4.3 Activate the virtual environment
+- 4.3 Activate the virtual environment
 Windows PowerShell
 .\.venv\Scripts\activate
 
-4.4 Install dependencies
+- 4.4 Install dependencies
 pip install -r requirements.txt
-4.5 Database Configuration & Migration
+- 4.5 Database Configuration & Migration
 alembic upgrade head
 
-4.6 Seed Data 
+- 4.6 Seed Data 
 Execute all test data scripts located under database/seed. You may also populate the database manually as needed.
 
 ## 5.Frontend Setup
 
-5.1 Navigate to the frontend directory
+- 5.1 Navigate to the frontend directory
 Open a new terminal and run:
 cd frontend
-5.2 Install dependencies
+- 5.2 Install dependencies
 npm install
-5.3 Start the development server
+- 5.3 Start the development server
 npm run dev
 
 Note: If this command fails, please check the scripts section in frontend/package.json to verify the defined startup command and execute accordingly.
