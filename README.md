@@ -28,8 +28,9 @@ AI_Agent_Driven_Campus_Governance_Platform/
 ├─ agent_server/   # Backend source code
 └─ frontend/       # Frontend source code
 
+```
 
-# 4. Backend Setup
+## 4. Backend Setup
 4.1 Navigate to the backend directory
 cd agent_server
 4.2 Create a virtual environment
